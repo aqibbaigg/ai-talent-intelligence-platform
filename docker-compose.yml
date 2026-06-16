@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL with pgvector extension ───────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: talent_postgres
+    environment:
+      POSTGRES_DB:       talent_db
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI backend ───────────────────────────────────────────────
+  api:
+    build: .
+    container_name: talent_api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL:      postgresql+asyncpg://postgres:password@postgres:5432/talent_db
+      DATABASE_SYNC_URL: postgresql://postgres:password@postgres:5432/talent_db
+      EMBEDDING_MODEL:   all-MiniLM-L6-v2
+      EMBEDDING_DIM:     384
+      DEBUG:             "false"
+      OPENAI_API_KEY:    ${OPENAI_API_KEY:-}
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
