@@ -8,6 +8,7 @@ Orchestrates the full resume processing pipeline:
   3. Extract skills (keyword + spaCy)
   4. Generate embedding (sentence transformer)
   5. Store in PostgreSQL
+  6. Add to FAISS index
 
 This is the service layer — it has no knowledge of HTTP (FastAPI).
 The route handler calls this service and handles HTTP responses.
@@ -24,6 +25,7 @@ from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateCreate, ParsedResume, CandidateResponse
 from app.services import parser, skill_extractor, embedder
 from app.core.config import settings
+from app.services.faiss_index import get_faiss_index
 from sqlalchemy import select, func, cast, String
 
 # ─────────────────────────────────────────────────────────────────
@@ -115,6 +117,27 @@ async def process_resume(
         "Candidate saved — id={} name={} skills={} embedding={}dims",
         candidate.id, name, len(skills), len(embedding),
     )
+
+    # ── Step 7: Add to FAISS index ────────────────────────────────
+    try:
+        index = get_faiss_index()
+        if candidate.embedding:
+            index.add(
+                candidate_id=candidate.id,
+                embedding=candidate.embedding,
+            )
+            logger.info(
+                "Candidate added to FAISS index — id={}",
+                candidate.id,
+            )
+        else:
+            logger.warning(
+                "Skipping FAISS indexing — no embedding for id={}",
+                candidate.id,
+            )
+    except Exception as e:
+        logger.error("FAISS indexing failed for id={}: {}", candidate.id, e)
+
     return candidate
 
 

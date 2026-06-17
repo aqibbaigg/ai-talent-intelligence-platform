@@ -7,22 +7,16 @@ Strategy (waterfall — tries best method first):
   1. pdfplumber  — best text extraction, handles tables
   2. PyPDF2      — fallback for encrypted/complex PDFs
   3. Raw bytes   — last resort, returns whatever text exists
-
-Why two libraries?
-  pdfplumber is more accurate but occasionally fails on
-  edge-case PDFs. PyPDF2 handles more formats but produces
-  messier output. Together they cover ~99% of real resumes.
 """
 
 import re
 import io
-from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 import pdfplumber
 import PyPDF2
 from loguru import logger
-from datetime import datetime
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -30,12 +24,6 @@ from datetime import datetime
 # ─────────────────────────────────────────────────────────────────
 
 def extract_text_pdfplumber(file_bytes: bytes) -> str:
-    """
-    Primary extractor. pdfplumber is best for:
-    - Multi-column resumes
-    - Tables (skills table, experience table)
-    - Headers and footers
-    """
     text_parts = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
@@ -46,9 +34,6 @@ def extract_text_pdfplumber(file_bytes: bytes) -> str:
 
 
 def extract_text_pypdf2(file_bytes: bytes) -> str:
-    """
-    Fallback extractor. Works on PDFs that pdfplumber struggles with.
-    """
     reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
     text_parts = []
     for page in reader.pages:
@@ -59,41 +44,14 @@ def extract_text_pypdf2(file_bytes: bytes) -> str:
 
 
 def clean_text(text: str) -> str:
-    """
-    Normalise extracted text:
-    - Collapse multiple blank lines
-    - Remove non-printable characters
-    - Normalise whitespace
-    """
-    # Remove non-printable characters (keep newlines and tabs)
     text = re.sub(r"[^\x20-\x7E\n\t]", " ", text)
-    # Collapse multiple spaces
     text = re.sub(r" {2,}", " ", text)
-    # Collapse 3+ blank lines into 2
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
 def extract_text(file_bytes: bytes, filename: str = "") -> str:
-    """
-    Main entry point — tries pdfplumber first, PyPDF2 as fallback.
-
-    Parameters
-    ----------
-    file_bytes : raw PDF bytes
-    filename   : used only for logging
-
-    Returns
-    -------
-    str — cleaned text content of the PDF
-
-    Raises
-    ------
-    ValueError if both extractors fail or text is too short
-    """
     text = ""
-
-    # Try pdfplumber first
     try:
         text = extract_text_pdfplumber(file_bytes)
         if text and len(text.strip()) > 50:
@@ -102,7 +60,6 @@ def extract_text(file_bytes: bytes, filename: str = "") -> str:
     except Exception as e:
         logger.warning("pdfplumber failed for {}: {}", filename, e)
 
-    # Fallback to PyPDF2
     try:
         text = extract_text_pypdf2(file_bytes)
         if text and len(text.strip()) > 50:
@@ -111,47 +68,37 @@ def extract_text(file_bytes: bytes, filename: str = "") -> str:
     except Exception as e:
         logger.warning("PyPDF2 failed for {}: {}", filename, e)
 
-    # Both failed
     if not text or len(text.strip()) < 50:
         raise ValueError(
             f"Could not extract readable text from '{filename}'. "
             "The PDF may be scanned (image-based) or password protected."
         )
-
     return clean_text(text)
 
 
 # ─────────────────────────────────────────────────────────────────
-#  Field extraction  (regex-based, fast, no ML needed)
+#  Field extraction
 # ─────────────────────────────────────────────────────────────────
 
 def extract_email(text: str) -> Optional[str]:
-    """Find first email address in text."""
     pattern = r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
     match = re.search(pattern, text)
     return match.group(0).lower() if match else None
 
 
 def extract_phone(text: str) -> Optional[str]:
-    """Find first phone number — handles many international formats."""
     pattern = r"""
-        (?:\+?\d{1,3}[\s\-\.]?)?   # country code
-        (?:\(?\d{2,4}\)?[\s\-\.]?) # area code
-        \d{3,4}[\s\-\.]?\d{4}      # number
+        (?:\+?\d{1,3}[\s\-\.]?)?
+        (?:\(?\d{2,4}\)?[\s\-\.]?)
+        \d{3,4}[\s\-\.]?\d{4}
     """
     match = re.search(pattern, text, re.VERBOSE)
     return match.group(0).strip() if match else None
 
 
 def extract_name(text: str) -> str:
-    """
-    Heuristic: the candidate's name is usually the first non-empty
-    line of the resume, in title case.
-    Falls back to 'Unknown' if not confident.
-    """
     lines = [l.strip() for l in text.split("\n") if l.strip()]
-    for line in lines[:5]:         # check first 5 lines only
-        # Name-like: 2-4 words, each capitalised, no numbers
+    for line in lines[:5]:
         words = line.split()
         if (
             2 <= len(words) <= 4
@@ -163,141 +110,177 @@ def extract_name(text: str) -> str:
     return lines[0][:100] if lines else "Unknown"
 
 
+# ─────────────────────────────────────────────────────────────────
+#  Experience extraction  (fixed)
+# ─────────────────────────────────────────────────────────────────
 
-import re
-from datetime import datetime
-from typing import Optional
+MONTH_MAP = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+    "may": 5, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+MONTH_NAMES = "|".join(MONTH_MAP.keys())   # jan|feb|mar|...
 
 
 def extract_experience_years(text: str) -> Optional[float]:
     """
-    Extract experience duration from resumes.
+    Extract total experience duration from resume text.
 
-    Handles:
-    Dec 2025 May 2026
-    Dec 2025 - May 2026
-    Dec 2025 – Present
+    Handles all common date range formats:
+      Month Year – Month Year    (Dec 2023 – May 2026)
+      Month Year - Month Year    (Dec 2023 - May 2026)
+      Month Year to Month Year   (Dec 2023 to May 2026)
+      Month Year – Present       (Dec 2023 – Present)
+      Year – Year                (2022 – 2024)
+      Year – Present             (2022 – Present)
     """
+    total_months = 0
+    now = datetime.now()
 
-    pattern = re.compile(
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})"
-        r".{0,20}?"
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Present)"
-        r"\s*(\d{4})?",
+    # ── Pattern 1: "Month Year … Month/Present Year?" ─────────────
+    month_range_pattern = re.compile(
+        rf"({MONTH_NAMES})\w*[\s.]+(\d{{4}})"          # start: Month YYYY
+        r"[\s\-–—to/]+?"                                # separator
+        rf"({MONTH_NAMES}|present)\w*[\s.]*(\d{{4}})?", # end: Month/Present YYYY?
         re.IGNORECASE,
     )
 
-    matches = pattern.findall(text)
+    for m in month_range_pattern.finditer(text):
+        start_mon, start_yr, end_mon, end_yr = m.groups()
+        try:
+            start = datetime(int(start_yr), MONTH_MAP[start_mon[:3].lower()], 1)
+            if end_mon.lower().startswith("present"):
+                end = now
+            else:
+                end = datetime(int(end_yr), MONTH_MAP[end_mon[:3].lower()], 1)
+            months = (end.year - start.year) * 12 + (end.month - start.month)
+            total_months += max(months, 0)
+        except Exception:
+            continue
 
-    print("EXPERIENCE MATCHES:", matches)
+    if total_months > 0:
+        logger.debug("Experience from month ranges: {} months", total_months)
+        return round(total_months / 12, 1)
 
-    if not matches:
-        return None
+    # ── Pattern 2: "Year – Year" or "Year – Present" ──────────────
+    year_range_pattern = re.compile(
+        r"\b(\d{4})\s*[\-–—to]+\s*(present|\d{4})\b",
+        re.IGNORECASE,
+    )
 
-    month_map = {
-        "jan": 1,
-        "feb": 2,
-        "mar": 3,
-        "apr": 4,
-        "may": 5,
-        "jun": 6,
-        "jul": 7,
-        "aug": 8,
-        "sep": 9,
-        "oct": 10,
-        "nov": 11,
-        "dec": 12,
-    }
+    # Only look in experience/work sections to avoid education years
+    experience_section = _extract_section(text, [
+        "experience", "work history", "employment", "internship", "projects"
+    ])
+    search_text = experience_section if experience_section else text
 
-    total_months = 0
+    for m in year_range_pattern.finditer(search_text):
+        start_yr, end_val = m.groups()
+        try:
+            start = datetime(int(start_yr), 1, 1)
+            end   = now if end_val.lower() == "present" else datetime(int(end_val), 12, 31)
+            # Skip ranges that look like education years (e.g. 2020–2024 in education section)
+            if end.year - int(start_yr) > 6:
+                continue
+            months = (end.year - start.year) * 12 + (end.month - start.month)
+            total_months += max(months, 0)
+        except Exception:
+            continue
 
-    for start_month, start_year, end_month, end_year in matches:
+    if total_months > 0:
+        logger.debug("Experience from year ranges: {} months", total_months)
+        return round(total_months / 12, 1)
 
-        start_date = datetime(
-            int(start_year),
-            month_map[start_month.lower()],
-            1,
-        )
-
-        if end_month.lower() == "present":
-            end_date = datetime.now()
-        else:
-            end_date = datetime(
-                int(end_year),
-                month_map[end_month.lower()],
-                1,
-            )
-
-        months = (
-            (end_date.year - start_date.year) * 12
-            + (end_date.month - start_date.month)
-        )
-
-        total_months += max(months, 0)
-
-    return round(total_months / 12, 1)
-
-
-def extract_education(text: str) -> Optional[str]:
-    """
-    Extract education section from resume.
-    """
-
-    education_keywords = [
-        "education",
-        "academic background",
-        "qualification",
-        "qualifications",
-    ]
-
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-
-    for i, line in enumerate(lines):
-        if any(keyword in line.lower() for keyword in education_keywords):
-
-            section = []
-
-            for next_line in lines[i + 1 : i + 6]:
-
-                if len(next_line) < 3:
-                    continue
-
-                if next_line.lower() in [
-                    "skills",
-                    "experience",
-                    "projects",
-                    "certifications",
-                ]:
-                    break
-
-                section.append(next_line)
-
-            if section:
-                return " | ".join(section)
-
-    degree_patterns = [
-        r"b\.?tech",
-        r"bachelor",
-        r"m\.?tech",
-        r"master",
-        r"b\.?e",
-        r"mca",
-        r"bca",
-        r"mba",
-        r"phd",
-        r"doctorate",
-    ]
-
-    for line in lines:
-        for pattern in degree_patterns:
-            if re.search(pattern, line.lower()):
-                return line
+    # ── Pattern 3: explicit "X years of experience" statement ─────
+    explicit = re.search(
+        r"(\d+(?:\.\d+)?)\s*\+?\s*years?\s+(?:of\s+)?experience",
+        text, re.IGNORECASE,
+    )
+    if explicit:
+        return float(explicit.group(1))
 
     return None
 
 
+def _extract_section(text: str, keywords: list[str]) -> Optional[str]:
+    """Return lines between a section header and the next section header."""
+    lines = text.splitlines()
+    section_headers = [
+        "education", "skills", "certifications", "projects",
+        "experience", "work", "employment", "summary", "objective",
+        "achievements", "publications", "languages",
+    ]
+    inside = False
+    collected = []
+
+    for line in lines:
+        lower = line.lower().strip()
+        if not inside:
+            if any(kw in lower for kw in keywords) and len(lower) < 40:
+                inside = True
+        else:
+            # Stop at next section header
+            if any(h in lower for h in section_headers if h not in keywords) and len(lower) < 40:
+                break
+            collected.append(line)
+
+    return "\n".join(collected) if collected else None
+
+
+# ─────────────────────────────────────────────────────────────────
+#  Education extraction  (fixed)
+# ─────────────────────────────────────────────────────────────────
+
+def extract_education(text: str) -> Optional[str]:
+    """
+    Extract education from resume.
+    Prioritises degree lines, not surrounding prose.
+    """
+    degree_patterns = [
+        r"b\.?\s*tech",
+        r"bachelor",
+        r"m\.?\s*tech",
+        r"master",
+        r"b\.?\s*e\.?",
+        r"b\.?\s*sc",
+        r"mca", r"bca", r"mba",
+        r"phd", r"ph\.d", r"doctorate",
+        r"engineering\s+computer",
+        r"computer\s+science",
+        r"information\s+technology",
+    ]
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    # First: find education section and collect institution + degree lines
+    education_section = _extract_section(text, ["education", "academic", "qualification"])
+    if education_section:
+        section_lines = [l.strip() for l in education_section.splitlines() if l.strip()]
+        # Pick lines that contain a degree keyword
+        degree_lines = [
+            l for l in section_lines
+            if any(re.search(p, l, re.IGNORECASE) for p in degree_patterns)
+        ]
+        if degree_lines:
+            return " | ".join(degree_lines[:3])
+        # Fall back to first few lines of the section
+        if section_lines:
+            return " | ".join(section_lines[:3])
+
+    # Fallback: scan all lines for degree patterns
+    for line in lines:
+        if any(re.search(p, line, re.IGNORECASE) for p in degree_patterns):
+            return line
+
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────
+#  Certifications extraction
+# ─────────────────────────────────────────────────────────────────
+
 def extract_certifications(text: str) -> list[str]:
-    """Find common professional certifications."""
     cert_patterns = [
         r"AWS\s+(?:Certified\s+)?[\w\s]+(?:Associate|Professional|Specialty)",
         r"Google\s+(?:Cloud\s+)?(?:Certified|Professional)\s+[\w\s]+",

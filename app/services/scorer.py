@@ -10,12 +10,6 @@ Formula (from project spec):
                 + 10% Certifications
 
 Each sub-score is 0–100. Final score is 0–100.
-
-Why weighted scoring instead of pure semantic similarity?
-  FAISS gives us semantic similarity (embedding closeness).
-  But a candidate with perfect skill match and 0 experience
-  should rank lower than one with perfect skill match + 5 years.
-  Weighted scoring lets recruiters tune priorities.
 """
 
 from dataclasses import dataclass
@@ -51,6 +45,61 @@ class ScoreBreakdown:
 #  Sub-scorers
 # ─────────────────────────────────────────────────────────────────
 
+def _skill_matches(candidate_skill: str, job_skill: str) -> bool:
+    """
+    Fuzzy skill matching — handles partial matches and common aliases.
+
+    Examples that should match:
+      "REST"       ↔ "REST API"
+      "Postgres"   ↔ "PostgreSQL"
+      "JS"         ↔ "JavaScript"
+      "ML"         ↔ "Machine Learning"
+    """
+    c = candidate_skill.lower().strip()
+    j = job_skill.lower().strip()
+
+    # Exact match
+    if c == j:
+        return True
+
+    # One contains the other (handles "REST" ↔ "REST API")
+    if c in j or j in c:
+        return True
+
+    # Token overlap — if ALL tokens of the shorter skill appear in the longer
+    c_tokens = set(c.split())
+    j_tokens = set(j.split())
+    shorter = c_tokens if len(c_tokens) <= len(j_tokens) else j_tokens
+    longer  = c_tokens if len(c_tokens) >  len(j_tokens) else j_tokens
+    if shorter and shorter.issubset(longer):
+        return True
+
+    # Common aliases
+    aliases = {
+        "js": "javascript",
+        "ts": "typescript",
+        "py": "python",
+        "ml": "machine learning",
+        "ai": "artificial intelligence",
+        "dl": "deep learning",
+        "nlp": "natural language processing",
+        "cv": "computer vision",
+        "postgres": "postgresql",
+        "mongo": "mongodb",
+        "k8s": "kubernetes",
+        "aws": "amazon web services",
+        "gcp": "google cloud",
+    }
+    c_resolved = aliases.get(c, c)
+    j_resolved = aliases.get(j, j)
+    if c_resolved == j_resolved:
+        return True
+    if c_resolved in j_resolved or j_resolved in c_resolved:
+        return True
+
+    return False
+
+
 def score_skills(
     candidate_skills: list[str],
     required_skills:  list[str],
@@ -62,26 +111,24 @@ def score_skills(
     Logic:
       - Required skills: worth 80% of skill score
       - Nice-to-have:    worth 20% of skill score
-      - Partial credit for each matched skill
+      - Uses fuzzy matching to handle partial names and aliases
     """
     if not required_skills:
         return 100.0   # no requirements = any candidate passes
 
-    candidate_lower = {s.lower() for s in candidate_skills}
-
-    # Required skills match
+    # Required skills match (fuzzy)
     required_matched = sum(
-        1 for s in required_skills
-        if s.lower() in candidate_lower
+        1 for req in required_skills
+        if any(_skill_matches(cand, req) for cand in candidate_skills)
     )
     required_score = (required_matched / len(required_skills)) * 100
 
-    # Nice-to-have boost
+    # Nice-to-have boost (fuzzy)
     nice_score = 0.0
     if nice_to_have:
         nice_matched = sum(
-            1 for s in nice_to_have
-            if s.lower() in candidate_lower
+            1 for req in nice_to_have
+            if any(_skill_matches(cand, req) for cand in candidate_skills)
         )
         nice_score = (nice_matched / len(nice_to_have)) * 100
 
@@ -100,7 +147,8 @@ def score_experience(
     Scoring bands:
       Below minimum:     partial credit (0–80)
       Within range:      100
-      Above maximum:     slight penalty (overqualified) → 90
+      Above maximum:     slight penalty (overqualified) → 85–90
+      Unknown years:     neutral 50
     """
     if candidate_years is None:
         return 50.0   # unknown — give neutral score
@@ -112,7 +160,7 @@ def score_experience(
     max_req = job_max or 99
 
     if candidate_years < min_req:
-        # Under-experienced — partial credit
+        # Under-experienced — partial credit proportional to gap
         ratio = candidate_years / max(min_req, 1)
         return round(min(80.0, ratio * 100), 2)
 
@@ -140,8 +188,8 @@ def score_education(
 
     # Education tier map — higher index = higher qualification
     tiers = [
-        ["diploma", "certificate"],
-        ["bachelor", "b.tech", "btech", "b.e", "b.sc", "bca"],
+        ["diploma", "certificate", "intermediate", "mpc"],
+        ["bachelor", "b.tech", "btech", "b.e", "b.sc", "bca", "engineering"],
         ["master", "m.tech", "mtech", "m.s", "m.sc", "mca", "mba"],
         ["phd", "ph.d", "doctorate"],
     ]
@@ -159,9 +207,9 @@ def score_education(
     if candidate_tier >= required_tier:
         return 100.0
     elif candidate_tier == required_tier - 1:
-        return 70.0   # one level below requirement
+        return 70.0
     else:
-        return 40.0   # significantly below
+        return 40.0
 
 
 def score_certifications(
@@ -173,9 +221,8 @@ def score_certifications(
     Bonus points if certifications complement required skills.
     """
     if not candidate_certs:
-        return 50.0   # neutral — not penalised for missing certs
+        return 80.0   # neutral — not penalised for missing certs
 
-    # Check if certs are relevant to the job
     req_lower = " ".join(required_skills).lower()
     relevant = sum(
         1 for cert in candidate_certs
@@ -183,7 +230,7 @@ def score_certifications(
     )
 
     if not relevant:
-        return 60.0   # has certs but not directly relevant
+        return 60.0
     return min(100.0, 60 + relevant * 20)
 
 
@@ -198,16 +245,6 @@ def compute_score(
 ) -> ScoreBreakdown:
     """
     Compute weighted final score for one candidate against one job.
-
-    Parameters
-    ----------
-    candidate      : Candidate ORM object
-    job            : Job ORM object
-    semantic_score : cosine similarity from FAISS (0.0–1.0)
-
-    Returns
-    -------
-    ScoreBreakdown with all sub-scores and weighted final
     """
     skill_score = score_skills(
         candidate.skills or [],
@@ -231,8 +268,7 @@ def compute_score(
     # Semantic score from FAISS (0–1 → 0–100)
     sem_score_pct = round(semantic_score * 100, 2)
 
-    # Weighted final score — semantic replaces pure skill match
-    # We blend FAISS semantic + keyword skill for robustness
+    # Blend keyword skill score + semantic similarity for robustness
     blended_skill = skill_score * 0.6 + sem_score_pct * 0.4
 
     final = round(

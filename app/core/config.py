@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 10
     UPLOAD_DIR: str = "uploads"
 
-    # ── LLM (Week 3) ─────────────────────────────────────────────
-    OPENAI_API_KEY: str = ""
+    # ── LLM ───────────────────────────────────────────────────────
+    OPENAI_API_KEY: str = ""       # kept for backward compat, not used
+    GEMINI_API_KEY: str = ""       # Google Gemini — get free key at aistudio.google.com
 
     @property
     def max_file_size_bytes(self) -> int:

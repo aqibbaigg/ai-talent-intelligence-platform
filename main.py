@@ -14,7 +14,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
-
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
 from app.services.embedder import get_model
