@@ -285,3 +285,4 @@ Recommendation:"""
             f"{'this candidate meets' if matched_skills else 'further review recommended for'} "
             f"the {job.title} role requirements."
         )
+    

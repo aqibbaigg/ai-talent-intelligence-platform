@@ -7,26 +7,21 @@ Orchestrates the full resume processing pipeline:
   2. Extract structured fields (name, email, phone, education)
   3. Extract skills (keyword + spaCy)
   4. Generate embedding (sentence transformer)
-  5. Store in PostgreSQL
+  5. Store in PostgreSQL (upsert — prevents duplicates)
   6. Add to FAISS index
-
-This is the service layer — it has no knowledge of HTTP (FastAPI).
-The route handler calls this service and handles HTTP responses.
 """
 
 import uuid
-from pathlib import Path
-
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast, String
 
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateCreate, ParsedResume, CandidateResponse
 from app.services import parser, skill_extractor, embedder
-from app.core.config import settings
 from app.services.faiss_index import get_faiss_index
-from sqlalchemy import select, func, cast, String
+from app.core.config import settings
+
 
 # ─────────────────────────────────────────────────────────────────
 #  Process resume — main pipeline
@@ -38,22 +33,10 @@ async def process_resume(
     db: AsyncSession,
 ) -> Candidate:
     """
-    Full resume processing pipeline.
+    Full resume processing pipeline with duplicate prevention.
 
-    Parameters
-    ----------
-    file_bytes : raw PDF bytes from upload
-    filename   : original filename (for logging + storage)
-    db         : async DB session
-
-    Returns
-    -------
-    Candidate  — the saved database record
-
-    Raises
-    ------
-    ValueError  if PDF cannot be parsed
-    Exception   if DB insert fails
+    If a candidate with the same email already exists, their record
+    is updated instead of creating a duplicate.
     """
     logger.info("Processing resume: {}", filename)
 
@@ -62,18 +45,13 @@ async def process_resume(
     logger.debug("Extracted {} chars from {}", len(raw_text), filename)
 
     # ── Step 2: Extract structured fields ─────────────────────────
-    name          = parser.extract_name(raw_text)
-    email         = parser.extract_email(raw_text)
-    phone         = parser.extract_phone(raw_text)
-    education     = parser.extract_education(raw_text)
-    exp_years     = parser.extract_experience_years(raw_text)
-    logger.info("EXPERIENCE FOUND = {}", exp_years)
+    name           = parser.extract_name(raw_text)
+    email          = parser.extract_email(raw_text)
+    phone          = parser.extract_phone(raw_text)
+    education      = parser.extract_education(raw_text)
+    exp_years      = parser.extract_experience_years(raw_text)
     certifications = parser.extract_certifications(raw_text)
-
-    logger.debug(
-        "Extracted fields — name={} email={} exp={}yrs skills=?",
-        name, email, exp_years,
-    )
+    logger.info("EXPERIENCE FOUND = {}", exp_years)
 
     # ── Step 3: Extract skills ────────────────────────────────────
     skills = skill_extractor.extract_all_skills(raw_text)
@@ -84,7 +62,7 @@ async def process_resume(
     embedding      = await embedder.generate_embedding_async(embedding_text)
     logger.debug("Embedding generated — dim={}", len(embedding))
 
-    # ── Step 5: Save to file (optional, for audit trail) ──────────
+    # ── Step 5: Save to file ──────────────────────────────────────
     file_path = None
     try:
         save_path = settings.upload_path / f"{uuid.uuid4()}_{filename}"
@@ -93,32 +71,62 @@ async def process_resume(
     except Exception as e:
         logger.warning("Could not save PDF file: {}", e)
 
-    # ── Step 6: Store in PostgreSQL ───────────────────────────────
-    candidate = Candidate(
-        id              = str(uuid.uuid4()),
-        name            = name,
-        email           = email,
-        phone           = phone,
-        raw_text        = raw_text,
-        file_name       = filename,
-        file_path       = file_path,
-        skills          = skills,
-        experience_years = exp_years,
-        experience_raw  = f"{exp_years} years" if exp_years else None,
-        education       = education,
-        certifications  = certifications,
-        embedding       = embedding,
-    )
+    # ── Step 6: Upsert in PostgreSQL (prevent duplicates) ─────────
+    candidate = None
+    is_update = False
 
-    db.add(candidate)
-    await db.flush()    # write to DB without committing (commit happens in get_db)
+    if email:
+        result = await db.execute(
+            select(Candidate).where(Candidate.email == email)
+        )
+        candidate = result.scalar_one_or_none()
+
+    if candidate:
+        # Update existing candidate
+        is_update            = True
+        candidate.name       = name
+        candidate.phone      = phone
+        candidate.raw_text   = raw_text
+        candidate.file_name  = filename
+        candidate.file_path  = file_path or candidate.file_path
+        candidate.skills     = skills
+        candidate.experience_years = exp_years
+        candidate.experience_raw   = f"{exp_years} years" if exp_years else None
+        candidate.education        = education
+        candidate.certifications   = certifications
+        candidate.embedding        = embedding
+        logger.info(
+            "Candidate updated (duplicate prevented) — id={} email={}",
+            candidate.id, email,
+        )
+    else:
+        # Create new candidate
+        candidate = Candidate(
+            id               = str(uuid.uuid4()),
+            name             = name,
+            email            = email,
+            phone            = phone,
+            raw_text         = raw_text,
+            file_name        = filename,
+            file_path        = file_path,
+            skills           = skills,
+            experience_years = exp_years,
+            experience_raw   = f"{exp_years} years" if exp_years else None,
+            education        = education,
+            certifications   = certifications,
+            embedding        = embedding,
+        )
+        db.add(candidate)
+
+    await db.flush()
 
     logger.info(
-        "Candidate saved — id={} name={} skills={} embedding={}dims",
+        "Candidate {} — id={} name={} skills={} embedding={}dims",
+        "updated" if is_update else "saved",
         candidate.id, name, len(skills), len(embedding),
     )
 
-    # ── Step 7: Add to FAISS index ────────────────────────────────
+    # ── Step 7: Add/update in FAISS index ────────────────────────
     try:
         index = get_faiss_index()
         if candidate.embedding:
@@ -146,7 +154,6 @@ async def process_resume(
 # ─────────────────────────────────────────────────────────────────
 
 async def get_candidate(candidate_id: str, db: AsyncSession) -> Candidate | None:
-    """Fetch a single candidate by ID."""
     result = await db.execute(
         select(Candidate).where(Candidate.id == candidate_id)
     )
@@ -158,29 +165,16 @@ async def list_candidates(
     skip: int = 0,
     limit: int = 20,
 ) -> tuple[int, list[Candidate]]:
-    """
-    Paginated list of all candidates.
+    count_result = await db.execute(select(func.count(Candidate.id)))
+    total        = count_result.scalar_one()
 
-    Returns
-    -------
-    (total_count, candidates_on_this_page)
-    """
-    # Total count
-    count_result = await db.execute(
-        select(func.count(Candidate.id))
-    )
-    total = count_result.scalar_one()
-
-    # Paginated results
     result = await db.execute(
         select(Candidate)
         .order_by(Candidate.created_at.desc())
         .offset(skip)
         .limit(limit)
     )
-    candidates = result.scalars().all()
-
-    return total, list(candidates)
+    return total, list(result.scalars().all())
 
 
 async def get_candidates_by_skill(
@@ -188,13 +182,9 @@ async def get_candidates_by_skill(
     db: AsyncSession,
     limit: int = 20,
 ) -> list[Candidate]:
-
     result = await db.execute(
         select(Candidate)
-        .where(
-            cast(Candidate.skills, String).ilike(f"%{skill}%")
-        )
+        .where(cast(Candidate.skills, String).ilike(f"%{skill}%"))
         .limit(limit)
     )
-
     return list(result.scalars().all())
