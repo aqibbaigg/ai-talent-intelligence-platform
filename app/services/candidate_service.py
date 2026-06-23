@@ -7,8 +7,14 @@ Orchestrates the full resume processing pipeline:
   2. Extract structured fields (name, email, phone, education)
   3. Extract skills (keyword + spaCy)
   4. Generate embedding (sentence transformer)
-  5. Store in PostgreSQL (upsert — prevents duplicates)
+  5. Store in PostgreSQL (upsert by filename — allows same person
+     to have multiple resumes for different roles)
   6. Add to FAISS index
+
+Deduplication strategy:
+  - Same filename uploaded again → update existing record
+  - Same email but different filename → create new candidate
+  This allows comparing e.g. "John_DataAnalyst.pdf" vs "John_MLEngineer.pdf"
 """
 
 import uuid
@@ -33,10 +39,12 @@ async def process_resume(
     db: AsyncSession,
 ) -> Candidate:
     """
-    Full resume processing pipeline with duplicate prevention.
+    Full resume processing pipeline.
 
-    If a candidate with the same email already exists, their record
-    is updated instead of creating a duplicate.
+    Deduplication: by filename only.
+    - Same filename → update existing record
+    - Different filename (even same email) → new candidate record
+    This allows one person to have multiple role-specific resumes.
     """
     logger.info("Processing resume: {}", filename)
 
@@ -71,36 +79,31 @@ async def process_resume(
     except Exception as e:
         logger.warning("Could not save PDF file: {}", e)
 
-    # ── Step 6: Upsert in PostgreSQL (prevent duplicates) ─────────
-    candidate = None
-    is_update = False
+    # ── Step 6: Upsert by filename ────────────────────────────────
+    # Same filename → update; different filename → new record
+    result    = await db.execute(
+        select(Candidate).where(Candidate.file_name == filename)
+    )
+    candidate = result.scalar_one_or_none()
+    is_update = candidate is not None
 
-    if email:
-        result = await db.execute(
-            select(Candidate).where(Candidate.email == email)
-        )
-        candidate = result.scalar_one_or_none()
-
-    if candidate:
-        # Update existing candidate
-        is_update            = True
-        candidate.name       = name
-        candidate.phone      = phone
-        candidate.raw_text   = raw_text
-        candidate.file_name  = filename
-        candidate.file_path  = file_path or candidate.file_path
-        candidate.skills     = skills
+    if is_update:
+        candidate.name             = name
+        candidate.email            = email
+        candidate.phone            = phone
+        candidate.raw_text         = raw_text
+        candidate.file_path        = file_path or candidate.file_path
+        candidate.skills           = skills
         candidate.experience_years = exp_years
         candidate.experience_raw   = f"{exp_years} years" if exp_years else None
         candidate.education        = education
         candidate.certifications   = certifications
         candidate.embedding        = embedding
         logger.info(
-            "Candidate updated (duplicate prevented) — id={} email={}",
-            candidate.id, email,
+            "Candidate updated (same filename) — id={} file={}",
+            candidate.id, filename,
         )
     else:
-        # Create new candidate
         candidate = Candidate(
             id               = str(uuid.uuid4()),
             name             = name,
@@ -121,9 +124,9 @@ async def process_resume(
     await db.flush()
 
     logger.info(
-        "Candidate {} — id={} name={} skills={} embedding={}dims",
+        "Candidate {} — id={} name={} file={} skills={} embedding={}dims",
         "updated" if is_update else "saved",
-        candidate.id, name, len(skills), len(embedding),
+        candidate.id, name, filename, len(skills), len(embedding),
     )
 
     # ── Step 7: Add/update in FAISS index ────────────────────────

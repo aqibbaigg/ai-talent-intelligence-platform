@@ -58,18 +58,21 @@ app = FastAPI(
 - **GET  /api/v1/matches/{job_id}** — retrieve saved results
 
 ### Week 3 — LLM / RAG
-- **POST /api/v1/chat**      — RAG Q&A over all resumes
-- **POST /api/v1/recommend** — GPT-4o candidate summary
+- **POST /api/v1/chat**                          — RAG Q&A over all resumes
+- **POST /api/v1/recommend/{candidate_id}**       — LLM candidate summary
+- **POST /api/v1/interview-questions/{candidate_id}** — tailored interview questions
+- **POST /api/v1/job-summary/{job_id}**           — AI job description summary
     """,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
+# Allow all origins so the local HTML file can call the API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

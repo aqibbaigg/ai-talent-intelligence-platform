@@ -1,215 +1,219 @@
 """
 app/api/resume.py
 ------------------
-FastAPI router for all resume-related endpoints.
+FastAPI router for resume endpoints.
 
-Endpoints
----------
-POST /upload-resume     Upload and process a PDF resume
-GET  /candidates        List all candidates (paginated)
-GET  /candidates/{id}   Get a single candidate
-GET  /candidates/skill/{skill}  Filter by skill
+POST   /api/v1/upload-resume        Upload single resume
+POST   /api/v1/upload-resumes-bulk  Upload multiple resumes at once
+DELETE /api/v1/candidates/all       Wipe all candidates and matches
+GET    /api/v1/candidates           List all candidates
+GET    /api/v1/candidates/{id}      Get single candidate
+GET    /api/v1/candidates/skill/{skill} Filter by skill
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+import uuid
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from loguru import logger
 
-from app.core.config import settings
 from app.core.database import get_db
-from app.schemas.candidate import CandidateResponse, CandidateList, ErrorResponse
-from app.services import candidate_service
+from app.core.config import settings
+from app.schemas.candidate import CandidateResponse
+from app.services.candidate_service import (
+    process_resume,
+    get_candidate,
+    list_candidates,
+    get_candidates_by_skill,
+)
 
-router = APIRouter(prefix="/api/v1", tags=["resumes"])
+router = APIRouter(prefix="/api/v1", tags=["resumes & candidates"])
 
 
 # ─────────────────────────────────────────────────────────────────
-#  POST /upload-resume  ← THE CORE WEEK 1 ENDPOINT
+#  POST /upload-resume  — single upload
 # ─────────────────────────────────────────────────────────────────
 
 @router.post(
     "/upload-resume",
     response_model=CandidateResponse,
     status_code=201,
-    summary="Upload and process a resume PDF",
-    description="""
-    Upload a candidate's resume (PDF only).
-
-    This endpoint:
-    1. Extracts text from the PDF (pdfplumber → PyPDF2 fallback)
-    2. Parses structured fields (name, email, phone, education)
-    3. Extracts skills (keyword matching + spaCy NER)
-    4. Generates a 384-dimensional sentence embedding
-    5. Stores everything in PostgreSQL
-
-    Returns the parsed candidate profile.
-    """,
+    summary="Upload a single resume PDF",
 )
 async def upload_resume(
-    file: UploadFile = File(..., description="Resume PDF file"),
-    db: AsyncSession = Depends(get_db),
+    file: UploadFile = File(...),
+    db:   AsyncSession = Depends(get_db),
 ) -> CandidateResponse:
-    """
-    Full resume processing pipeline in one endpoint.
-    """
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    # ── Validate file type ────────────────────────────────────────
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files are accepted. Please upload a .pdf file.",
-        )
-
-    # ── Validate file size ────────────────────────────────────────
     file_bytes = await file.read()
     if len(file_bytes) > settings.max_file_size_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum size is {settings.MAX_FILE_SIZE_MB}MB.",
-        )
-    if len(file_bytes) < 100:
-        raise HTTPException(
-            status_code=400,
-            detail="File appears to be empty or corrupt.",
-        )
+        raise HTTPException(status_code=413, detail=f"File too large. Max {settings.MAX_FILE_SIZE_MB}MB.")
 
-    logger.info(
-        "Resume upload received — file={} size={}KB",
-        file.filename, len(file_bytes) // 1024,
-    )
-
-    # ── Process resume (parse → extract → embed → store) ──────────
     try:
-        candidate = await candidate_service.process_resume(
-            file_bytes=file_bytes,
-            filename=file.filename,
-            db=db,
-        )
+        candidate = await process_resume(file_bytes, file.filename, db)
     except ValueError as e:
-        # Parser couldn't extract text (scanned PDF, etc.)
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error("Resume processing failed: {}", e)
-        raise HTTPException(
-            status_code=500,
-            detail="Resume processing failed. Please try again.",
-        )
+        raise HTTPException(status_code=500, detail="Resume processing failed.")
 
-    # ── Build response ─────────────────────────────────────────────
     return CandidateResponse(
-        id                  = candidate.id,
-        name                = candidate.name,
-        email               = candidate.email,
-        phone               = candidate.phone,
-        file_name           = candidate.file_name,
-        skills              = candidate.skills,
-        experience_years    = candidate.experience_years,
-        experience_raw      = candidate.experience_raw,
-        education           = candidate.education,
-        certifications      = candidate.certifications,
-        embedding_generated = candidate.embedding is not None,
-        created_at          = candidate.created_at,
+        id               = candidate.id,
+        name             = candidate.name,
+        email            = candidate.email,
+        phone            = candidate.phone,
+        skills           = candidate.skills or [],
+        experience_years = candidate.experience_years,
+        education        = candidate.education,
+        certifications   = candidate.certifications or [],
+        file_name        = candidate.file_name,
+        created_at       = candidate.created_at,
     )
 
 
 # ─────────────────────────────────────────────────────────────────
-#  GET /candidates  — paginated list
+#  POST /upload-resumes-bulk  — multiple uploads
 # ─────────────────────────────────────────────────────────────────
 
-@router.get(
-    "/candidates",
-    response_model=CandidateList,
-    summary="List all candidates",
+@router.post(
+    "/upload-resumes-bulk",
+    status_code=200,
+    summary="Upload multiple resume PDFs at once",
 )
-async def list_candidates(
-    skip:  int = Query(default=0, ge=0, description="Pagination offset"),
-    limit: int = Query(default=20, ge=1, le=100, description="Results per page"),
+async def upload_resumes_bulk(
+    files: list[UploadFile] = File(...),
+    db:    AsyncSession     = Depends(get_db),
+) -> dict:
+    if len(files) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 files per upload.")
+
+    results   = []
+    succeeded = 0
+    failed    = 0
+
+    for file in files:
+        if not file.filename.endswith(".pdf"):
+            results.append({"file_name": file.filename, "status": "failed", "error": "Not a PDF file"})
+            failed += 1
+            continue
+
+        file_bytes = await file.read()
+        if len(file_bytes) > settings.max_file_size_bytes:
+            results.append({"file_name": file.filename, "status": "failed", "error": f"File too large (max {settings.MAX_FILE_SIZE_MB}MB)"})
+            failed += 1
+            continue
+
+        try:
+            candidate = await process_resume(file_bytes, file.filename, db)
+            results.append({
+                "file_name":        file.filename,
+                "status":           "success",
+                "candidate_id":     candidate.id,
+                "name":             candidate.name,
+                "email":            candidate.email,
+                "skills":           (candidate.skills or [])[:10],
+                "experience_years": candidate.experience_years,
+                "education":        candidate.education,
+            })
+            succeeded += 1
+        except Exception as e:
+            logger.error("Bulk upload failed for {}: {}", file.filename, e)
+            results.append({"file_name": file.filename, "status": "failed", "error": str(e)})
+            failed += 1
+
+    logger.info("Bulk upload complete — {} succeeded, {} failed", succeeded, failed)
+    return {"total": len(files), "succeeded": succeeded, "failed": failed, "results": results}
+
+
+# ─────────────────────────────────────────────────────────────────
+#  DELETE /candidates/all  — wipe everything and reset FAISS
+# ─────────────────────────────────────────────────────────────────
+
+@router.delete(
+    "/candidates/all",
+    status_code=200,
+    summary="Delete all candidates and matches, reset FAISS index",
+)
+async def delete_all_candidates(
     db: AsyncSession = Depends(get_db),
-) -> CandidateList:
-    total, candidates = await candidate_service.list_candidates(db, skip, limit)
-    return CandidateList(
-        total=total,
-        candidates=[
+) -> dict:
+    try:
+        await db.execute(text("DELETE FROM matches"))
+        await db.execute(text("DELETE FROM candidates"))
+        await db.flush()
+
+        # Reset FAISS index in memory using proper reset()
+        from app.services.faiss_index import get_faiss_index
+        index = get_faiss_index()
+        index.reset()
+
+        logger.info("All candidates and matches deleted")
+        return {
+            "message":   "All candidates, matches deleted and FAISS index reset.",
+            "candidates": 0,
+            "matches":    0,
+        }
+    except Exception as e:
+        logger.error("Failed to delete all candidates: {}", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────
+#  GET /candidates
+# ─────────────────────────────────────────────────────────────────
+
+@router.get("/candidates", response_model=dict, summary="List all candidates")
+async def list_all_candidates(
+    skip:  int = Query(default=0,  ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    db:    AsyncSession = Depends(get_db),
+) -> dict:
+    total, candidates = await list_candidates(db, skip=skip, limit=limit)
+    return {
+        "total": total, "skip": skip, "limit": limit,
+        "candidates": [
             CandidateResponse(
-                id                  = c.id,
-                name                = c.name,
-                email               = c.email,
-                phone               = c.phone,
-                file_name           = c.file_name,
-                skills              = c.skills,
-                experience_years    = c.experience_years,
-                experience_raw      = c.experience_raw,
-                education           = c.education,
-                certifications      = c.certifications,
-                embedding_generated = c.embedding is not None,
-                created_at          = c.created_at,
-            )
-            for c in candidates
+                id=c.id, name=c.name, email=c.email, phone=c.phone,
+                skills=c.skills or [], experience_years=c.experience_years,
+                education=c.education, certifications=c.certifications or [],
+                file_name=c.file_name, created_at=c.created_at,
+            ) for c in candidates
         ],
-    )
+    }
 
 
 # ─────────────────────────────────────────────────────────────────
-#  GET /candidates/{id}  — single candidate
+#  GET /candidates/{id}
 # ─────────────────────────────────────────────────────────────────
 
-@router.get(
-    "/candidates/{candidate_id}",
-    response_model=CandidateResponse,
-    summary="Get candidate by ID",
-)
-async def get_candidate(
-    candidate_id: str,
-    db: AsyncSession = Depends(get_db),
-) -> CandidateResponse:
-    candidate = await candidate_service.get_candidate(candidate_id, db)
+@router.get("/candidates/{candidate_id}", response_model=CandidateResponse, summary="Get a single candidate")
+async def get_candidate_by_id(candidate_id: str, db: AsyncSession = Depends(get_db)) -> CandidateResponse:
+    candidate = await get_candidate(candidate_id, db)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
-
     return CandidateResponse(
-        id                  = candidate.id,
-        name                = candidate.name,
-        email               = candidate.email,
-        phone               = candidate.phone,
-        file_name           = candidate.file_name,
-        skills              = candidate.skills,
-        experience_years    = candidate.experience_years,
-        experience_raw      = candidate.experience_raw,
-        education           = candidate.education,
-        certifications      = candidate.certifications,
-        embedding_generated = candidate.embedding is not None,
-        created_at          = candidate.created_at,
+        id=candidate.id, name=candidate.name, email=candidate.email,
+        phone=candidate.phone, skills=candidate.skills or [],
+        experience_years=candidate.experience_years, education=candidate.education,
+        certifications=candidate.certifications or [], file_name=candidate.file_name,
+        created_at=candidate.created_at,
     )
 
 
 # ─────────────────────────────────────────────────────────────────
-#  GET /candidates/skill/{skill}  — filter by skill
+#  GET /candidates/skill/{skill}
 # ─────────────────────────────────────────────────────────────────
 
-@router.get(
-    "/candidates/skill/{skill}",
-    response_model=list[CandidateResponse],
-    summary="Find candidates with a specific skill",
-)
-async def get_by_skill(
-    skill: str,
-    db: AsyncSession = Depends(get_db),
-) -> list[CandidateResponse]:
-    candidates = await candidate_service.get_candidates_by_skill(skill, db)
+@router.get("/candidates/skill/{skill}", response_model=list[CandidateResponse], summary="Filter by skill")
+async def get_by_skill(skill: str, limit: int = Query(default=20, ge=1, le=100), db: AsyncSession = Depends(get_db)) -> list[CandidateResponse]:
+    candidates = await get_candidates_by_skill(skill, db, limit=limit)
     return [
         CandidateResponse(
-            id                  = c.id,
-            name                = c.name,
-            email               = c.email,
-            phone               = c.phone,
-            file_name           = c.file_name,
-            skills              = c.skills,
-            experience_years    = c.experience_years,
-            experience_raw      = c.experience_raw,
-            education           = c.education,
-            certifications      = c.certifications,
-            embedding_generated = c.embedding is not None,
-            created_at          = c.created_at,
-        )
-        for c in candidates
+            id=c.id, name=c.name, email=c.email, phone=c.phone,
+            skills=c.skills or [], experience_years=c.experience_years,
+            education=c.education, certifications=c.certifications or [],
+            file_name=c.file_name, created_at=c.created_at,
+        ) for c in candidates
     ]

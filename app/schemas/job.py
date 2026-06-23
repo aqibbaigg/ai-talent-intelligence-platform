@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 # ── Job schemas ───────────────────────────────────────────────────
 
 class JobCreate(BaseModel):
-    """Body for POST /jobs"""
     title:               str
     company:             Optional[str]  = None
     description:         str            = Field(..., min_length=50)
@@ -54,7 +53,6 @@ class ScoreBreakdown(BaseModel):
 
 
 class CandidateMatchResult(BaseModel):
-    """One candidate in a match result list."""
     rank:             int
     candidate_id:     str
     name:             str
@@ -63,19 +61,19 @@ class CandidateMatchResult(BaseModel):
     experience_years: Optional[float]
     education:        Optional[str]
     final_score:      float
+    ats_score:        float = 0.0        # ← NEW
     score_breakdown:  ScoreBreakdown
-    llm_summary:      Optional[str] = None   # filled in Week 3
+    llm_summary:      Optional[str] = None
 
 
 class MatchResponse(BaseModel):
-    """Response for POST /match"""
-    job_id:     str
-    job_title:  str
+    job_id:                   str
+    job_title:                str
     total_candidates_scanned: int
-    top_matches: list[CandidateMatchResult]
+    top_matches:              list[CandidateMatchResult]
 
 
-# ── RAG / Chat schemas (Week 3) ───────────────────────────────────
+# ── RAG / Chat schemas ────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=5)
@@ -85,5 +83,5 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     question:   str
     answer:     str
-    sources:    list[dict]   # candidate IDs used as RAG context
+    sources:    list[dict]
     model_used: str
