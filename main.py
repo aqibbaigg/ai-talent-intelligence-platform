@@ -1,13 +1,5 @@
 """
 main.py  —  AI Talent Intelligence Platform
----------------------------------------------
-Startup sequence:
-  1. Load config from .env
-  2. Init DB (create tables, enable pgvector)
-  3. Build FAISS index from existing candidates in DB
-  4. Warm up embedding model
-  5. Register routers: resume, jobs, chat
-  6. Serve
 """
 
 from contextlib import asynccontextmanager
@@ -21,20 +13,21 @@ from app.services.faiss_index import build_index_from_db
 from app.api.resume import router as resume_router
 from app.api.jobs   import router as jobs_router
 from app.api.chat   import router as chat_router
+from app.api.auth   import router as auth_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting {} v{}", settings.APP_NAME, settings.APP_VERSION)
 
-    # 1. Init DB
+    # Import all models so tables are created
+    from app.models import candidate, job, match, user  # noqa
+
     await init_db()
 
-    # 2. Warm up embedding model
     logger.info("Loading embedding model: {}", settings.EMBEDDING_MODEL)
     get_model()
 
-    # 3. Build FAISS index from DB
     async with AsyncSessionLocal() as db:
         await build_index_from_db(db)
 
@@ -46,29 +39,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="""
-## AI Talent Intelligence Platform
-
-### Week 1 — Resume ingestion
-- **POST /api/v1/upload-resume** — parse PDF, extract skills, store 384-dim embedding
-
-### Week 2 — FAISS matching
-- **POST /api/v1/jobs**   — create job with embedding
-- **POST /api/v1/match**  — FAISS search + weighted scoring
-- **GET  /api/v1/matches/{job_id}** — retrieve saved results
-
-### Week 3 — LLM / RAG
-- **POST /api/v1/chat**                          — RAG Q&A over all resumes
-- **POST /api/v1/recommend/{candidate_id}**       — LLM candidate summary
-- **POST /api/v1/interview-questions/{candidate_id}** — tailored interview questions
-- **POST /api/v1/job-summary/{job_id}**           — AI job description summary
-    """,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
-# Allow all origins so the local HTML file can call the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -77,6 +52,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(resume_router)
 app.include_router(jobs_router)
 app.include_router(chat_router)
@@ -87,11 +63,11 @@ async def health():
     from app.services.faiss_index import get_faiss_index
     idx = get_faiss_index()
     return {
-        "status":              "ok",
-        "version":             settings.APP_VERSION,
-        "embedding_model":     settings.EMBEDDING_MODEL,
-        "candidates_indexed":  idx.total,
-        "faiss_ready":         idx.is_ready,
+        "status":             "ok",
+        "version":            settings.APP_VERSION,
+        "embedding_model":    settings.EMBEDDING_MODEL,
+        "candidates_indexed": idx.total,
+        "faiss_ready":        idx.is_ready,
     }
 
 
