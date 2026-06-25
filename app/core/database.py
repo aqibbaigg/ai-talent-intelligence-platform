@@ -2,12 +2,6 @@
 app/core/database.py
 ---------------------
 Async PostgreSQL connection using SQLAlchemy 2.0.
-pgvector extension enables storing 384-dim embeddings natively.
-
-Why async?
-  FastAPI is async — blocking DB calls would kill concurrency.
-  asyncpg + SQLAlchemy async lets us handle hundreds of concurrent
-  resume uploads without threads.
 """
 
 from sqlalchemy.ext.asyncio import (
@@ -21,39 +15,56 @@ from loguru import logger
 from app.core.config import settings
 
 
+def _get_async_url(url: str) -> str:
+    """
+    Convert any postgres URL format to asyncpg format.
+    Handles:
+      postgresql://     → postgresql+asyncpg://
+      postgres://       → postgresql+asyncpg://
+      postgresql+asyncpg:// → unchanged
+    """
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+def _get_sync_url(url: str) -> str:
+    """Convert any postgres URL to plain sync format."""
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    elif url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return url
+
+
 # ── Engine ────────────────────────────────────────────────────────
+_async_url = _get_async_url(settings.DATABASE_URL)
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,       # logs all SQL in debug mode
-    pool_size=10,              # concurrent DB connections
+    _async_url,
+    echo=settings.DEBUG,
+    pool_size=10,
     max_overflow=20,
-    pool_pre_ping=True,        # auto-reconnect on dropped connections
+    pool_pre_ping=True,
 )
 
 # ── Session factory ───────────────────────────────────────────────
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False,    # objects stay usable after commit
+    expire_on_commit=False,
 )
 
 
-# ── Base class for all ORM models ─────────────────────────────────
+# ── Base class ────────────────────────────────────────────────────
 class Base(DeclarativeBase):
     pass
 
 
-# ── Dependency injection for FastAPI routes ───────────────────────
+# ── Dependency ────────────────────────────────────────────────────
 async def get_db() -> AsyncSession:
-    """
-    FastAPI dependency — yields a DB session per request.
-    Session is automatically closed after the request completes.
-
-    Usage in route:
-        @app.post("/upload-resume")
-        async def upload(db: AsyncSession = Depends(get_db)):
-            ...
-    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -65,14 +76,8 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
-# ── DB initialisation ─────────────────────────────────────────────
+# ── DB init ───────────────────────────────────────────────────────
 async def init_db() -> None:
-    """
-    Create all tables and enable pgvector extension.
-    Called once at app startup.
-    """
     async with engine.begin() as conn:
-        # Enable pgvector — must exist before creating vector columns
-        # Create all tables defined in models
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database initialised — tables ready")
