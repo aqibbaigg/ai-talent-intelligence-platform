@@ -3,7 +3,8 @@ main.py  —  AI Talent Intelligence Platform
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from app.core.config import settings
@@ -19,18 +20,12 @@ from app.api.auth   import router as auth_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting {} v{}", settings.APP_NAME, settings.APP_VERSION)
-
-    # Import all models so tables are created
     from app.models import candidate, job, match, user  # noqa
-
     await init_db()
-
     logger.info("Loading embedding model: {}", settings.EMBEDDING_MODEL)
     get_model()
-
     async with AsyncSessionLocal() as db:
         await build_index_from_db(db)
-
     logger.info("All systems ready")
     yield
     logger.info("Shutting down")
@@ -44,14 +39,31 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+
+# ── Manual CORS middleware (handles preflight properly) ───────────
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        response = JSONResponse(content={}, status_code=200)
+        response.headers["Access-Control-Allow-Origin"]  = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Max-Age"]       = "3600"
+        return response
+
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"]  = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=3600,
 )
 
 app.include_router(auth_router)
