@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TalentIQ — AI Recruiter Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2230;
+    --border: #2a3245; --accent: #4f8ef7; --accent2: #7c5cbf;
+    --success: #3fb950; --warning: #d29922; --danger: #f85149;
+    --text: #e6edf3; --text-muted: #7d8590; --text-dim: #484f58;
+    --radius: 10px; --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; }
+
+  .sidebar { width:240px; min-height:100vh; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; position:fixed; top:0; left:0; bottom:0; z-index:100; }
+  .sidebar-logo { padding:28px 24px 20px; border-bottom:1px solid var(--border); }
+  .logo-mark { font-family:'DM Serif Display',serif; font-size:22px; color:var(--text); letter-spacing:-0.5px; }
+  .logo-mark span { color:var(--accent); }
+  .logo-sub { font-size:11px; color:var(--text-muted); margin-top:2px; letter-spacing:0.5px; text-transform:uppercase; }
+  .sidebar-nav { flex:1; padding:16px 12px; display:flex; flex-direction:column; gap:2px; }
+  .nav-section-label { font-size:10px; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:var(--text-dim); padding:12px 12px 6px; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:7px; cursor:pointer; font-size:14px; color:var(--text-muted); transition:all 0.15s; border:none; background:none; width:100%; text-align:left; }
+  .nav-item:hover { background:var(--surface2); color:var(--text); }
+  .nav-item.active { background:rgba(79,142,247,0.12); color:var(--accent); font-weight:500; }
+  .nav-item .icon { width:18px; text-align:center; font-size:16px; }
+  .sidebar-footer { padding:16px; border-top:1px solid var(--border); }
+  .status-pill { display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(63,185,80,0.1); border:1px solid rgba(63,185,80,0.25); border-radius:7px; font-size:12px; color:var(--success); }
+  .status-dot { width:7px; height:7px; border-radius:50%; background:var(--success); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .main { margin-left:240px; flex:1; min-height:100vh; }
+  .topbar { height:60px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 32px; background:var(--surface); position:sticky; top:0; z-index:50; }
+  .page-title { font-size:15px; font-weight:600; }
+  .avatar { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600; color:white; cursor:pointer; }
+  .content { padding:32px; max-width:1200px; }
+
+  .page { display:none; }
+  .page.active { display:block; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; }
+  .card-title { font-size:13px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+
+  .page-header { margin-bottom:28px; }
+  .page-header h1 { font-family:'DM Serif Display',serif; font-size:28px; color:var(--text); margin-bottom:4px; }
+  .page-header p { font-size:14px; color:var(--text-muted); }
+
+  .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+  .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px 24px; position:relative; overflow:hidden; }
+  .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+  .stat-card.blue::before { background:var(--accent); }
+  .stat-card.purple::before { background:var(--accent2); }
+  .stat-card.green::before { background:var(--success); }
+  .stat-card.orange::before { background:var(--warning); }
+  .stat-value { font-size:32px; font-weight:700; color:var(--text); line-height:1; margin-bottom:4px; }
+  .stat-label { font-size:13px; color:var(--text-muted); }
+  .stat-icon { position:absolute; top:20px; right:20px; font-size:22px; opacity:0.3; }
+
+  .dashboard-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .activity-list { display:flex; flex-direction:column; gap:12px; }
+  .activity-item { display:flex; align-items:center; gap:12px; padding:12px; background:var(--surface2); border-radius:7px; font-size:13px; }
+  .activity-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .activity-dot.blue { background:var(--accent); }
+  .activity-dot.green { background:var(--success); }
+  .activity-dot.purple { background:var(--accent2); }
+  .activity-text { flex:1; color:var(--text); }
+  .activity-time { color:var(--text-muted); font-size:12px; }
+
+  .form-group { margin-bottom:18px; }
+  label { display:block; font-size:13px; font-weight:500; color:var(--text-muted); margin-bottom:6px; }
+  input, textarea, select { width:100%; padding:10px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:7px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; outline:none; transition:border-color 0.15s; }
+  input:focus, textarea:focus, select:focus { border-color:var(--accent); }
+  textarea { resize:vertical; min-height:100px; }
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+
+  .btn { padding:10px 20px; border-radius:7px; font-size:14px; font-weight:500; cursor:pointer; border:none; transition:all 0.15s; font-family:'Inter',sans-serif; }
+  .btn-primary { background:var(--accent); color:white; }
+  .btn-primary:hover { background:#3d7de8; }
+  .btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
+  .btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+  .btn-secondary:hover { background:var(--border); }
+  .btn-danger { background:rgba(248,81,73,0.15); color:var(--danger); border:1px solid rgba(248,81,73,0.3); }
+
+  /* Upload */
+  .upload-zone { border:2px dashed var(--border); border-radius:var(--radius); padding:48px 32px; text-align:center; cursor:pointer; transition:all 0.2s; position:relative; }
+  .upload-zone:hover, .upload-zone.drag-over { border-color:var(--accent); background:rgba(79,142,247,0.05); }
+  .upload-zone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+  .upload-icon { font-size:40px; margin-bottom:12px; }
+  .upload-title { font-size:16px; font-weight:600; margin-bottom:6px; }
+  .upload-sub { font-size:13px; color:var(--text-muted); }
+
+  /* Bulk upload file list */
+  .file-list { display:flex; flex-direction:column; gap:8px; margin-top:16px; }
+  .file-item { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--surface2); border-radius:7px; font-size:13px; border:1px solid var(--border); }
+  .file-item .file-icon { font-size:20px; }
+  .file-item .file-info { flex:1; }
+  .file-item .file-name { font-weight:500; color:var(--text); }
+  .file-item .file-size { font-size:11px; color:var(--text-muted); }
+  .file-item .file-status { font-size:12px; font-weight:600; padding:2px 10px; border-radius:20px; }
+  .file-status.pending  { background:var(--surface); color:var(--text-muted); border:1px solid var(--border); }
+  .file-status.processing { background:rgba(79,142,247,0.1); color:var(--accent); border:1px solid rgba(79,142,247,0.3); }
+  .file-status.success  { background:rgba(63,185,80,0.1); color:var(--success); border:1px solid rgba(63,185,80,0.3); }
+  .file-status.failed   { background:rgba(248,81,73,0.1); color:var(--danger); border:1px solid rgba(248,81,73,0.3); }
+
+  /* Progress bar */
+  .progress-wrap { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; margin:12px 0; }
+  .progress-fill { height:100%; background:linear-gradient(90deg,var(--accent2),var(--accent)); border-radius:3px; transition:width 0.3s; }
+
+  /* Bulk summary */
+  .bulk-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px; }
+  .bulk-stat { padding:14px; border-radius:8px; text-align:center; }
+  .bulk-stat.total   { background:var(--surface2); border:1px solid var(--border); }
+  .bulk-stat.success { background:rgba(63,185,80,0.08); border:1px solid rgba(63,185,80,0.25); }
+  .bulk-stat.fail    { background:rgba(248,81,73,0.08); border:1px solid rgba(248,81,73,0.25); }
+  .bulk-stat-num { font-size:24px; font-weight:700; }
+  .bulk-stat.success .bulk-stat-num { color:var(--success); }
+  .bulk-stat.fail    .bulk-stat-num { color:var(--danger); }
+  .bulk-stat-label { font-size:12px; color:var(--text-muted); margin-top:2px; }
+
+  /* Toast */
+  .toast-container { position:fixed; bottom:24px; right:24px; display:flex; flex-direction:column; gap:10px; z-index:999; }
+  .toast { padding:12px 18px; border-radius:8px; font-size:14px; font-weight:500; color:white; box-shadow:var(--shadow); animation:slideIn 0.2s ease; max-width:340px; }
+  .toast.success { background:#1a4a1e; border:1px solid var(--success); color:var(--success); }
+  .toast.error   { background:#3d1a1a; border:1px solid var(--danger);  color:var(--danger); }
+  .toast.info    { background:#1a2a4a; border:1px solid var(--accent);  color:var(--accent); }
+  @keyframes slideIn { from{transform:translateX(100px);opacity:0} to{transform:translateX(0);opacity:1} }
+
+  /* Match cards */
+  .match-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px 24px; margin-bottom:12px; display:grid; grid-template-columns:48px 1fr auto; gap:16px; align-items:start; transition:border-color 0.15s; cursor:pointer; }
+  .match-card:hover { border-color:var(--accent); }
+  .rank-badge { width:40px; height:40px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px; color:var(--text-muted); border:2px solid var(--border); }
+  .rank-badge.top { border-color:var(--accent); color:var(--accent); background:rgba(79,142,247,0.1); }
+  .match-name { font-size:15px; font-weight:600; margin-bottom:4px; }
+  .match-email { font-size:13px; color:var(--text-muted); margin-bottom:8px; }
+  .skills-row { display:flex; flex-wrap:wrap; gap:6px; }
+  .skill-tag { padding:2px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:20px; font-size:12px; color:var(--text-muted); }
+  .score-display { text-align:right; }
+  .score-number { font-size:28px; font-weight:700; color:var(--text); line-height:1; }
+  .score-label { font-size:11px; color:var(--text-muted); margin-bottom:8px; }
+  .score-bar-wrap { width:100px; height:4px; background:var(--surface2); border-radius:2px; overflow:hidden; margin-left:auto; }
+  .score-bar-fill { height:100%; border-radius:2px; background:linear-gradient(90deg,var(--accent2),var(--accent)); }
+  .breakdown-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:10px; }
+  .breakdown-item { background:var(--surface2); border-radius:7px; padding:10px; text-align:center; }
+  .breakdown-value { font-size:16px; font-weight:700; color:var(--text); }
+  .breakdown-label { font-size:10px; color:var(--text-muted); margin-top:2px; }
+
+  /* Chat */
+  .chat-container { display:flex; flex-direction:column; height:calc(100vh - 140px); }
+  .chat-messages { flex:1; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:16px; }
+  .chat-bubble { max-width:80%; padding:12px 16px; border-radius:12px; font-size:14px; line-height:1.6; }
+  .chat-bubble.user { background:var(--accent); color:white; margin-left:auto; border-bottom-right-radius:4px; }
+  .chat-bubble.ai { background:var(--surface2); color:var(--text); border-bottom-left-radius:4px; border:1px solid var(--border); }
+  .chat-bubble.ai .bubble-label { font-size:11px; font-weight:600; color:var(--accent); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; }
+  .chat-sources { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .source-chip { padding:3px 10px; background:rgba(79,142,247,0.1); border:1px solid rgba(79,142,247,0.25); border-radius:20px; font-size:11px; color:var(--accent); }
+  .chat-input-row { display:flex; gap:10px; }
+  .chat-input-row input { flex:1; padding:12px 16px; font-size:14px; }
+
+  /* Spinner */
+  .spinner { width:20px; height:20px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; display:inline-block; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .loading-bubble { display:flex; align-items:center; gap:10px; background:var(--surface2); border:1px solid var(--border); border-radius:12px; border-bottom-left-radius:4px; padding:12px 16px; width:fit-content; font-size:13px; color:var(--text-muted); }
+
+  /* Profile */
+  .profile-header { display:flex; align-items:center; gap:20px; margin-bottom:24px; }
+  .profile-avatar { width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:700; color:white; flex-shrink:0; }
+  .profile-name { font-size:22px; font-weight:700; }
+  .profile-email { font-size:14px; color:var(--text-muted); margin-top:2px; }
+  .llm-summary { background:rgba(79,142,247,0.06); border:1px solid rgba(79,142,247,0.2); border-radius:var(--radius); padding:16px 20px; font-size:14px; line-height:1.7; color:var(--text); margin-bottom:20px; font-style:italic; }
+  .questions-list { display:flex; flex-direction:column; gap:10px; }
+  .question-item { display:flex; gap:12px; padding:12px 16px; background:var(--surface2); border-radius:7px; font-size:14px; line-height:1.5; }
+  .question-num { font-weight:700; color:var(--accent); flex-shrink:0; min-width:20px; }
+
+  .empty-state { text-align:center; padding:60px 32px; color:var(--text-muted); }
+  .empty-state .empty-icon { font-size:48px; margin-bottom:16px; }
+  .empty-state h3 { font-size:18px; color:var(--text); margin-bottom:8px; }
+
+  .section-title { font-size:15px; font-weight:600; color:var(--text); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+  .badge { padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; }
+  .badge-blue { background:rgba(79,142,247,0.15); color:var(--accent); }
+  .badge-green { background:rgba(63,185,80,0.15); color:var(--success); }
+  .divider { height:1px; background:var(--border); margin:20px 0; }
+  select option { background:var(--surface); }
+
+  /* Tabs */
+  .tabs { display:flex; gap:2px; background:var(--surface2); padding:4px; border-radius:8px; margin-bottom:24px; width:fit-content; }
+  .tab { padding:7px 16px; border-radius:6px; font-size:13px; font-weight:500; cursor:pointer; color:var(--text-muted); border:none; background:none; font-family:'Inter',sans-serif; transition:all 0.15s; }
+  .tab.active { background:var(--surface); color:var(--text); }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">Talent<span>IQ</span></div>
+    <div class="logo-sub">AI Recruiter Platform</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Main</div>
+    <button class="nav-item active" onclick="navigate('dashboard')"><span class="icon">⬡</span> Dashboard</button>
+    <button class="nav-item" onclick="navigate('upload')"><span class="icon">↑</span> Upload Resumes</button>
+    <button class="nav-item" onclick="navigate('post-job')"><span class="icon">＋</span> Post a Job</button>
+    <div class="nav-section-label">Recruiting</div>
+    <button class="nav-item" onclick="navigate('matches')"><span class="icon">◎</span> Match Results</button>
+    <button class="nav-item" onclick="navigate('candidates')"><span class="icon">☰</span> Candidate Profile</button>
+    <div class="nav-section-label">AI Tools</div>
+    <button class="nav-item" onclick="navigate('chat')"><span class="icon">✦</span> AI Chat</button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-pill"><div class="status-dot"></div> API Connected</div>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <div class="page-title" id="topbar-title">Dashboard</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size:13px;color:var(--text-muted);" id="user-name-display"></span>
+      <div class="avatar" onclick="logout()" title="Click to logout" style="cursor:pointer;">MA</div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h1>Good morning, Recruiter</h1>
+        <p>Here's what's happening on your platform today.</p>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card blue"><div class="stat-icon">📄</div><div class="stat-value" id="stat-candidates">—</div><div class="stat-label">Candidates indexed</div></div>
+        <div class="stat-card purple"><div class="stat-icon">💼</div><div class="stat-value" id="stat-jobs">—</div><div class="stat-label">Active jobs</div></div>
+        <div class="stat-card green"><div class="stat-icon">✓</div><div class="stat-value" id="stat-faiss">—</div><div class="stat-label">FAISS index</div></div>
+        <div class="stat-card orange"><div class="stat-icon">⚡</div><div class="stat-value">llama3.2</div><div class="stat-label">AI model</div></div>
+      </div>
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-title">Recent Activity</div>
+          <div class="activity-list" id="activity-list">
+            <div class="activity-item"><div class="activity-dot blue"></div><div class="activity-text">Platform loaded</div><div class="activity-time">Just now</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Quick Actions</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+            <button class="btn btn-primary" onclick="navigate('upload')">↑ Upload Resumes</button>
+            <button class="btn btn-secondary" onclick="navigate('post-job')">＋ Post a Job</button>
+            <button class="btn btn-secondary" onclick="navigate('chat')">✦ Ask AI a Question</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UPLOAD RESUMES (BULK) -->
+    <div class="page" id="page-upload">
+      <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <h1>Upload Resumes</h1>
+          <p>Upload one or multiple PDF resumes at once. All will be parsed, embedded, and indexed for matching.</p>
+        </div>
+        <button class="btn btn-danger" onclick="clearAllCandidates()" style="margin-top:6px;white-space:nowrap;">
+          🗑 Clear All & Re-upload
+        </button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start;">
+        <div>
+          <div class="card" style="margin-bottom:16px;">
+            <div class="upload-zone" id="upload-zone">
+              <input type="file" accept=".pdf" id="resume-files" multiple onchange="handleFilesSelect(event)" />
+              <div class="upload-icon">📂</div>
+              <div class="upload-title">Drop PDFs here or click to browse</div>
+              <div class="upload-sub">Select multiple files at once · PDF only · Max 10MB each · Up to 20 files</div>
+            </div>
+          </div>
+
+          <div id="file-list-section" style="display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <div class="section-title" style="margin:0;" id="file-count-label">0 files selected</div>
+              <button class="btn btn-danger" style="padding:6px 14px;font-size:13px;" onclick="clearFiles()">✕ Clear All</button>
+            </div>
+            <div class="file-list" id="file-list"></div>
+            <div style="margin-top:16px;display:flex;gap:10px;">
+              <button class="btn btn-primary" style="flex:1;" onclick="uploadAll()" id="upload-all-btn">
+                ↑ Upload All Resumes
+              </button>
+            </div>
+          </div>
+
+          <div id="upload-progress-section" style="display:none;margin-top:16px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:6px;">
+              <span>Processing resumes...</span>
+              <span id="progress-text">0 / 0</span>
+            </div>
+            <div class="progress-wrap"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+          </div>
+        </div>
+
+        <div id="upload-summary" style="display:none;">
+          <div class="card">
+            <div class="card-title">Upload Summary</div>
+            <div class="bulk-summary" id="bulk-summary-stats"></div>
+            <div id="bulk-results-list"></div>
+            <div class="divider"></div>
+            <button class="btn btn-primary" style="width:100%;" onclick="navigate('matches')">→ Run Match</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- POST JOB -->
+    <div class="page" id="page-post-job">
+      <div class="page-header">
+        <h1>Post a Job</h1>
+        <p>Create a job posting and find matching candidates instantly.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start;">
+        <div class="card">
+          <div class="form-group"><label>Job Title *</label><input type="text" id="job-title" placeholder="e.g. Python Backend Developer" /></div>
+          <div class="form-row">
+            <div class="form-group"><label>Company</label><input type="text" id="job-company" placeholder="e.g. Acme Corp" /></div>
+            <div class="form-group"><label>Job Type</label><select id="job-type"><option value="full-time">Full-time</option><option value="part-time">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select></div>
+          </div>
+          <div class="form-group"><label>Job Description *</label><textarea id="job-description" rows="5" placeholder="Describe the role, responsibilities, and requirements..."></textarea></div>
+          <div class="form-group"><label>Required Skills (comma separated)</label><input type="text" id="job-required-skills" placeholder="e.g. Python, FastAPI, PostgreSQL, Docker" /></div>
+          <div class="form-group"><label>Nice-to-have Skills (comma separated)</label><input type="text" id="job-nice-skills" placeholder="e.g. Redis, Kubernetes, AWS" /></div>
+          <div class="form-row">
+            <div class="form-group"><label>Min Experience (years)</label><input type="number" id="job-exp-min" placeholder="e.g. 2" min="0" /></div>
+            <div class="form-group"><label>Max Experience (years)</label><input type="number" id="job-exp-max" placeholder="e.g. 5" min="0" /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Education</label><input type="text" id="job-education" placeholder="e.g. Bachelor's" /></div>
+            <div class="form-group"><label>Location</label><input type="text" id="job-location" placeholder="e.g. Remote" /></div>
+          </div>
+          <button class="btn btn-primary" style="width:100%;" onclick="postJob()">Post Job & Find Matches</button>
+        </div>
+        <div class="card" id="job-result" style="display:none;">
+          <div class="card-title">Job Created</div>
+          <div id="job-result-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MATCH RESULTS -->
+    <div class="page" id="page-matches">
+      <div class="page-header">
+        <h1>Match Results</h1>
+        <p>Top candidates ranked by AI scoring for your job.</p>
+      </div>
+      <div class="card" style="margin-bottom:20px;">
+        <div style="display:flex;gap:12px;align-items:flex-end;">
+          <div class="form-group" style="flex:1;margin:0;"><label>Select Job</label><select id="match-job-select"><option value="">— Load jobs —</option></select></div>
+          <div class="form-group" style="margin:0;"><label>Top K</label><input type="number" id="match-top-k" value="10" min="1" max="50" style="width:80px;" /></div>
+          <button class="btn btn-primary" onclick="runMatch()">Run Match</button>
+          <button class="btn btn-secondary" onclick="loadJobs()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="match-results">
+        <div class="empty-state"><div class="empty-icon">◎</div><h3>No matches yet</h3><p>Select a job and click Run Match.</p></div>
+      </div>
+    </div>
+
+    <!-- CANDIDATE PROFILE -->
+    <div class="page" id="page-candidates">
+      <div class="page-header">
+        <h1>Candidate Profile</h1>
+        <p>AI-generated summary and interview questions for any candidate.</p>
+      </div>
+      <div class="card" style="margin-bottom:20px;max-width:500px;">
+        <div style="display:flex;gap:10px;">
+          <input type="text" id="candidate-id-input" placeholder="Paste candidate ID here..." style="flex:1;" />
+          <button class="btn btn-primary" onclick="loadCandidateProfile()">Load Profile</button>
+        </div>
+      </div>
+      <div id="candidate-profile">
+        <div class="empty-state"><div class="empty-icon">☰</div><h3>No candidate loaded</h3><p>Paste a candidate ID from Match Results to view their profile.</p></div>
+      </div>
+    </div>
+
+    <!-- AI CHAT -->
+    <div class="page" id="page-chat">
+      <div class="page-header">
+        <h1>AI Recruiter Chat</h1>
+        <p>Ask anything about your candidate pool. Powered by llama3.2 + FAISS.</p>
+      </div>
+      <div class="chat-container">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-bubble ai">
+            <div class="bubble-label">TalentIQ AI</div>
+            Hello! I can search your candidate pool and answer questions. Try asking:<br><br>
+            • "Who is the best Python developer?"<br>
+            • "Find candidates with NLP and Docker skills"<br>
+            • "Which candidates have machine learning experience?"
+          </div>
+        </div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="Ask about your candidates..." onkeydown="if(event.key==='Enter') sendChat()" />
+          <button class="btn btn-primary" onclick="sendChat()" id="chat-send-btn">Send</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+const API = 'https://ai-talent-intelligence-platform-production.up.railway.app/api/v1';
+let currentJobId = null;
+let selectedFiles = [];
+
+// ── Auth guard ───────────────────────────────────────────────────
+const token = localStorage.getItem('talentiq_token');
+if (!token) window.location.href = 'login.html';
+
+// Show user name in avatar
+const userName = localStorage.getItem('talentiq_user_name') || 'Recruiter';
+const initials = userName.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+document.querySelector('.avatar').textContent = initials;
+document.querySelector('.avatar').title = 'Logout';
+const nameDisplay = document.getElementById('user-name-display');
+if (nameDisplay) nameDisplay.textContent = userName;
+
+function logout() {
+  localStorage.removeItem('talentiq_token');
+  localStorage.removeItem('talentiq_user_name');
+  localStorage.removeItem('talentiq_user_email');
+  window.location.href = 'login.html';
+}
+
+// ── Navigation ──────────────────────────────────────────────────
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  const titles = { dashboard:'Dashboard', upload:'Upload Resumes', 'post-job':'Post a Job', matches:'Match Results', candidates:'Candidate Profile', chat:'AI Chat' };
+  document.getElementById('topbar-title').textContent = titles[page] || page;
+  // highlight nav
+  document.querySelectorAll('.nav-item').forEach(n => {
+    const txt = n.textContent.trim().toLowerCase();
+    if ((page === 'dashboard' && txt.includes('dashboard')) ||
+        (page === 'upload' && txt.includes('upload')) ||
+        (page === 'post-job' && txt.includes('post')) ||
+        (page === 'matches' && txt.includes('match')) ||
+        (page === 'candidates' && txt.includes('candidate')) ||
+        (page === 'chat' && txt.includes('chat'))) {
+      n.classList.add('active');
+    }
+  });
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'matches') loadJobs();
+}
+
+// ── Toast ────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── Dashboard ────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const res = await fetch('http://localhost:8000/health');
+    const data = await res.json();
+    document.getElementById('stat-candidates').textContent = data.candidates_indexed ?? '—';
+    document.getElementById('stat-faiss').textContent = data.faiss_ready ? 'Ready ✓' : 'Not ready';
+  } catch(e) {
+    document.getElementById('stat-candidates').textContent = 'Offline';
+    document.getElementById('stat-faiss').textContent = 'Offline';
+  }
+  try {
+    const res = await fetch(`${API}/jobs`);
+    const jobs = await res.json();
+    document.getElementById('stat-jobs').textContent = jobs.length;
+  } catch(e) { document.getElementById('stat-jobs').textContent = '—'; }
+}
+
+// ── Bulk Upload ──────────────────────────────────────────────────
+function handleFilesSelect(e) {
+  selectedFiles = Array.from(e.target.files);
+  renderFileList();
+}
+
+function renderFileList() {
+  const section = document.getElementById('file-list-section');
+  const listEl  = document.getElementById('file-list');
+  const countEl = document.getElementById('file-count-label');
+
+  if (selectedFiles.length === 0) { section.style.display = 'none'; return; }
+
+  section.style.display = 'block';
+  countEl.textContent = `${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''} selected`;
+
+  listEl.innerHTML = selectedFiles.map((f, i) => `
+    <div class="file-item" id="file-item-${i}">
+      <span class="file-icon">📄</span>
+      <div class="file-info">
+        <div class="file-name">${f.name}</div>
+        <div class="file-size">${(f.size / 1024).toFixed(1)} KB</div>
+      </div>
+      <span class="file-status pending" id="status-${i}">Pending</span>
+    </div>`).join('');
+}
+
+function clearFiles() {
+  selectedFiles = [];
+  document.getElementById('resume-files').value = '';
+  document.getElementById('file-list-section').style.display = 'none';
+  document.getElementById('upload-summary').style.display = 'none';
+  document.getElementById('upload-progress-section').style.display = 'none';
+}
+
+async function uploadAll() {
+  if (selectedFiles.length === 0) return toast('Please select PDF files first.', 'error');
+
+  const btn = document.getElementById('upload-all-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Uploading...';
+
+  const progressSection = document.getElementById('upload-progress-section');
+  const progressFill    = document.getElementById('progress-fill');
+  const progressText    = document.getElementById('progress-text');
+  progressSection.style.display = 'block';
+
+  const formData = new FormData();
+  selectedFiles.forEach(f => formData.append('files', f));
+
+  // Mark all as processing
+  selectedFiles.forEach((_, i) => {
+    const el = document.getElementById(`status-${i}`);
+    if (el) { el.className = 'file-status processing'; el.textContent = 'Processing...'; }
+  });
+
+  progressText.textContent = `0 / ${selectedFiles.length}`;
+  progressFill.style.width = '10%';
+
+  try {
+    const res  = await fetch(`${API}/upload-resumes-bulk`, { method:'POST', body:formData });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.detail || 'Bulk upload failed');
+
+    // Update individual file statuses
+    data.results.forEach((r, i) => {
+      const el = document.getElementById(`status-${i}`);
+      if (el) {
+        el.className = `file-status ${r.status}`;
+        el.textContent = r.status === 'success' ? '✓ Done' : '✗ Failed';
+      }
+    });
+
+    progressFill.style.width = '100%';
+    progressText.textContent = `${data.succeeded} / ${data.total}`;
+
+    // Show summary
+    const summaryEl = document.getElementById('upload-summary');
+    summaryEl.style.display = 'block';
+    document.getElementById('bulk-summary-stats').innerHTML = `
+      <div class="bulk-stat total"><div class="bulk-stat-num">${data.total}</div><div class="bulk-stat-label">Total</div></div>
+      <div class="bulk-stat success"><div class="bulk-stat-num">${data.succeeded}</div><div class="bulk-stat-label">Succeeded</div></div>
+      <div class="bulk-stat fail"><div class="bulk-stat-num">${data.failed}</div><div class="bulk-stat-label">Failed</div></div>`;
+
+    document.getElementById('bulk-results-list').innerHTML = data.results
+      .filter(r => r.status === 'success')
+      .map(r => `
+        <div style="padding:10px;background:var(--surface2);border-radius:7px;margin-bottom:8px;font-size:13px;">
+          <div style="font-weight:600;color:var(--text);">${r.name || 'Unknown'}</div>
+          <div style="color:var(--text-muted);margin-top:2px;">${r.email || '—'} · ${r.experience_years != null ? r.experience_years + ' yrs' : 'Exp unknown'}</div>
+          <div style="color:var(--accent);font-size:11px;margin-top:4px;">ID: ${r.candidate_id}</div>
+        </div>`).join('');
+
+    toast(`${data.succeeded} of ${data.total} resumes uploaded successfully!`, 'success');
+    addActivity(`Bulk upload: ${data.succeeded} resumes added`, 'green');
+    loadDashboard();
+
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↑ Upload All Resumes';
+  }
+}
+
+// ── Post Job ─────────────────────────────────────────────────────
+async function postJob() {
+  const title = document.getElementById('job-title').value.trim();
+  const desc  = document.getElementById('job-description').value.trim();
+  if (!title || !desc) return toast('Job title and description are required.', 'error');
+
+  const parseSkills = id => document.getElementById(id).value.split(',').map(s => s.trim()).filter(Boolean);
+
+  const payload = {
+    title, company: document.getElementById('job-company').value.trim() || null,
+    description: desc, required_skills: parseSkills('job-required-skills'),
+    nice_to_have_skills: parseSkills('job-nice-skills'),
+    experience_min: parseInt(document.getElementById('job-exp-min').value) || null,
+    experience_max: parseInt(document.getElementById('job-exp-max').value) || null,
+    education: document.getElementById('job-education').value.trim() || null,
+    location: document.getElementById('job-location').value.trim() || null,
+    job_type: document.getElementById('job-type').value,
+  };
+
+  try {
+    const res  = await fetch(`${API}/jobs`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Job creation failed');
+
+    currentJobId = data.id;
+    document.getElementById('job-result').style.display = 'block';
+    document.getElementById('job-result-content').innerHTML = `
+      <div style="font-weight:600;color:var(--success);margin-bottom:12px;">✓ Job posted</div>
+      <div style="font-size:13px;display:grid;gap:8px;color:var(--text-muted);">
+        <div><strong style="color:var(--text);">${data.title}</strong></div>
+        <div>ID: <code style="font-size:11px;color:var(--accent);">${data.id}</code></div>
+        <div>Embedding: ${data.embedding_generated ? '✓ Generated' : '✗ Failed'}</div>
+      </div>
+      <div class="divider"></div>
+      <button class="btn btn-primary" style="width:100%;" onclick="navigate('matches')">→ View Matches</button>`;
+
+    toast('Job posted!', 'success');
+    addActivity(`Job posted: ${data.title}`, 'purple');
+    setTimeout(() => navigate('matches'), 1500);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Match Results ────────────────────────────────────────────────
+async function loadJobs() {
+  try {
+    const res  = await fetch(`${API}/jobs`);
+    const jobs = await res.json();
+    const sel  = document.getElementById('match-job-select');
+    sel.innerHTML = '<option value="">— Select a job —</option>';
+    jobs.forEach(j => {
+      const opt = document.createElement('option');
+      opt.value = j.id;
+      opt.textContent = j.title + (j.company ? ` — ${j.company}` : '');
+      sel.appendChild(opt);
+    });
+    if (currentJobId) sel.value = currentJobId;
+  } catch(e) { toast('Could not load jobs.', 'error'); }
+}
+
+async function runMatch() {
+  const jobId = document.getElementById('match-job-select').value;
+  const topK  = document.getElementById('match-top-k').value || 10;
+  if (!jobId) return toast('Please select a job.', 'error');
+
+  const resultsEl = document.getElementById('match-results');
+  resultsEl.innerHTML = '<div class="loading-bubble"><div class="spinner"></div> Running FAISS match...</div>';
+
+  try {
+    const res  = await fetch(`${API}/match?job_id=${jobId}&top_k=${topK}`, { method:'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Match failed');
+
+    if (!data.top_matches || data.top_matches.length === 0) {
+      resultsEl.innerHTML = `<div class="empty-state"><div class="empty-icon">◎</div><h3>No matches found</h3><p>Upload more resumes and try again.</p></div>`;
+      return;
+    }
+
+    resultsEl.innerHTML = `
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+        Scanned <strong style="color:var(--text);">${data.total_candidates_scanned}</strong> candidates
+        for <strong style="color:var(--text);">${data.job_title}</strong>
+      </div>
+      ${data.top_matches.map(m => renderMatchCard(m, jobId)).join('')}`;
+
+    addActivity(`Matched candidates for: ${data.job_title}`, 'green');
+  } catch(e) {
+    toast(e.message, 'error');
+    resultsEl.innerHTML = `<div class="empty-state"><div class="empty-icon">✗</div><h3>Match failed</h3><p>${e.message}</p></div>`;
+  }
+}
+
+function renderMatchCard(m, jobId) {
+  const isTop = m.rank <= 3;
+  const scoreColor = m.final_score >= 70 ? 'var(--success)' : m.final_score >= 50 ? 'var(--warning)' : 'var(--danger)';
+  const atsScore   = m.ats_score ?? 0;
+  const atsColor   = atsScore >= 70 ? 'var(--success)' : atsScore >= 50 ? 'var(--warning)' : 'var(--danger)';
+  return `
+    <div class="match-card" onclick="viewCandidate('${m.candidate_id}','${jobId}')">
+      <div class="rank-badge ${isTop ? 'top' : ''}">#${m.rank}</div>
+      <div>
+        <div class="match-name">${m.name || 'Unknown'}</div>
+        <div class="match-email">${m.email || '—'} · ${m.experience_years != null ? m.experience_years + ' yrs exp' : 'Experience unknown'}</div>
+        <div class="skills-row">${(m.skills || []).slice(0,10).map(s => `<span class="skill-tag">${s}</span>`).join('')}</div>
+        <div class="breakdown-grid">
+          ${[['Skill',m.score_breakdown.skill_score],['Exp',m.score_breakdown.experience_score],['Edu',m.score_breakdown.education_score],['Cert',m.score_breakdown.cert_score],['Semantic',m.score_breakdown.semantic_score]]
+            .map(([l,v]) => `<div class="breakdown-item"><div class="breakdown-value">${Math.round(v)}</div><div class="breakdown-label">${l}</div></div>`).join('')}
+        </div>
+      </div>
+      <div class="score-display">
+        <div style="display:flex;gap:16px;align-items:flex-start;justify-content:flex-end;">
+          <div style="text-align:center;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">MATCH</div>
+            <div class="score-number" style="color:${scoreColor};">${m.final_score.toFixed(1)}</div>
+            <div class="score-label">/ 100</div>
+            <div class="score-bar-wrap"><div class="score-bar-fill" style="width:${m.final_score}%;"></div></div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">ATS</div>
+            <div class="score-number" style="color:${atsColor};">${atsScore.toFixed(1)}</div>
+            <div class="score-label">/ 100</div>
+            <div class="score-bar-wrap"><div class="score-bar-fill" style="width:${atsScore}%;background:${atsColor};"></div></div>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:right;"><span class="badge badge-blue" style="font-size:10px;">View Profile →</span></div>
+      </div>
+    </div>`;
+}
+
+function viewCandidate(candidateId, jobId) {
+  document.getElementById('candidate-id-input').value = candidateId;
+  navigate('candidates');
+  loadCandidateProfile(jobId);
+}
+
+// ── Candidate Profile ────────────────────────────────────────────
+async function loadCandidateProfile(jobId = null) {
+  const candidateId = document.getElementById('candidate-id-input').value.trim();
+  if (!candidateId) return toast('Please enter a candidate ID.', 'error');
+
+  const profileEl = document.getElementById('candidate-profile');
+  profileEl.innerHTML = '<div class="loading-bubble"><div class="spinner"></div> Loading profile...</div>';
+
+  try {
+    const recUrl = `${API}/recommend/${candidateId}${jobId ? '?job_id='+jobId : ''}`;
+    const recRes = await fetch(recUrl, { method:'POST' });
+    const recData = await recRes.json();
+
+    const iqUrl  = `${API}/interview-questions/${candidateId}${jobId ? '?job_id='+jobId : ''}`;
+    const iqRes  = await fetch(iqUrl, { method:'POST' });
+    const iqData = await iqRes.json();
+
+    const initials = (recData.name || 'U').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+
+    profileEl.innerHTML = `
+      <div class="profile-header">
+        <div class="profile-avatar">${initials}</div>
+        <div><div class="profile-name">${recData.name || 'Unknown'}</div>
+        <div class="profile-email">ID: <code style="font-size:12px;color:var(--accent);">${candidateId}</code></div></div>
+      </div>
+      <div class="section-title">✦ AI Summary <span class="badge badge-blue">llama3.2</span></div>
+      <div class="llm-summary">${recData.summary || 'No summary generated.'}</div>
+      <div class="section-title">Interview Questions</div>
+      <div class="questions-list">
+        ${(iqData.questions || []).map((q,i) => `<div class="question-item"><div class="question-num">${i+1}.</div><div>${q}</div></div>`).join('')}
+      </div>`;
+
+    toast('Profile loaded!', 'success');
+  } catch(e) {
+    toast(e.message, 'error');
+    profileEl.innerHTML = `<div class="empty-state"><div class="empty-icon">✗</div><h3>Could not load profile</h3><p>${e.message}</p></div>`;
+  }
+}
+
+// ── AI Chat ──────────────────────────────────────────────────────
+async function sendChat() {
+  const input    = document.getElementById('chat-input');
+  const question = input.value.trim();
+  if (!question) return;
+
+  const messagesEl = document.getElementById('chat-messages');
+  messagesEl.innerHTML += `<div class="chat-bubble user">${question}</div>`;
+  input.value = '';
+  input.disabled = true;
+  document.getElementById('chat-send-btn').disabled = true;
+
+  const loadId = 'loading-' + Date.now();
+  messagesEl.innerHTML += `<div class="loading-bubble" id="${loadId}"><div class="spinner"></div> Searching candidates...</div>`;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  try {
+    const res  = await fetch(`${API}/chat`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ question, top_k:5 }) });
+    const data = await res.json();
+    document.getElementById(loadId)?.remove();
+
+    const sourcesHtml = data.sources && data.sources.length
+      ? `<div class="chat-sources">${data.sources.map(s => `<span class="source-chip">👤 ${s.name}</span>`).join('')}</div>` : '';
+
+    messagesEl.innerHTML += `
+      <div class="chat-bubble ai">
+        <div class="bubble-label">TalentIQ AI · ${data.model_used}</div>
+        ${data.answer}${sourcesHtml}
+      </div>`;
+  } catch(e) {
+    document.getElementById(loadId)?.remove();
+    messagesEl.innerHTML += `<div class="chat-bubble ai"><div class="bubble-label">Error</div>Could not reach the API. Make sure the server is running.</div>`;
+  } finally {
+    input.disabled = false;
+    document.getElementById('chat-send-btn').disabled = false;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    input.focus();
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+function addActivity(text, color) {
+  const list = document.getElementById('activity-list');
+  const now  = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  list.insertAdjacentHTML('afterbegin', `
+    <div class="activity-item">
+      <div class="activity-dot ${color}"></div>
+      <div class="activity-text">${text}</div>
+      <div class="activity-time">${now}</div>
+    </div>`);
+}
+
+// ── Clear All Candidates ─────────────────────────────────────────
+async function clearAllCandidates() {
+  const confirmed = confirm(
+    '⚠️ This will permanently delete ALL candidates, matches and reset the FAISS index.\n\nAre you sure you want to continue?'
+  );
+  if (!confirmed) return;
+
+  try {
+    const res  = await fetch(`${API}/candidates/all`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Delete failed');
+
+    // Reset UI
+    clearFiles();
+    document.getElementById('upload-summary').style.display = 'none';
+    document.getElementById('upload-progress-section').style.display = 'none';
+    document.getElementById('match-results').innerHTML = `
+      <div class="empty-state"><div class="empty-icon">◎</div><h3>No matches yet</h3><p>Select a job and click Run Match.</p></div>`;
+
+    toast('All candidates cleared. Ready for fresh upload!', 'success');
+    addActivity('All candidates deleted — FAISS reset', 'blue');
+    loadDashboard();
+  } catch(e) {
+    toast('Failed to clear: ' + e.message, 'error');
+  }
+}
+
+loadDashboard();
+</script>
+</body>
+</html>
