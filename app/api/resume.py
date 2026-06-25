@@ -30,6 +30,12 @@ from app.services.candidate_service import (
 router = APIRouter(prefix="/api/v1", tags=["resumes & candidates"])
 
 
+# ── OPTIONS handler for CORS preflight ───────────────────────────
+@router.options("/upload-resumes-bulk")
+async def upload_resumes_bulk_options():
+    return {}
+
+
 # ─────────────────────────────────────────────────────────────────
 #  POST /upload-resume  — single upload
 # ─────────────────────────────────────────────────────────────────
@@ -217,5 +223,3 @@ async def get_by_skill(skill: str, limit: int = Query(default=20, ge=1, le=100),
             file_name=c.file_name, created_at=c.created_at,
         ) for c in candidates
     ]
-
-
