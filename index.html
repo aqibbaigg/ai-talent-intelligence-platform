@@ -468,7 +468,7 @@ function toast(msg, type = 'info') {
 // ── Dashboard ────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    const res = await fetch('http://localhost:8000/health');
+    const res = await fetch('https://ai-talent-intelligence-platform-production.up.railway.app/health');
     const data = await res.json();
     document.getElementById('stat-candidates').textContent = data.candidates_indexed ?? '—';
     document.getElementById('stat-faiss').textContent = data.faiss_ready ? 'Ready ✓' : 'Not ready';
