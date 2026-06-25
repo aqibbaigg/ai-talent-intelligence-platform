@@ -2,16 +2,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system deps for pdfplumber + psycopg2
 RUN apt-get update && apt-get install -y \
-    gcc libpq-dev \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Download spaCy model
 RUN python -m spacy download en_core_web_lg
+
+# Download sentence transformer model at build time
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY . .
 

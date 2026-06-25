@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Environment files (never include secrets in Docker image)
+.env
+.env.local
+.env.production
+
+# Uploads (use volume instead)
+uploads/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+tests/
+test_*.py
+pytest.ini
+
+# Logs
+*.log
+
+# Node (if any frontend build tools)
+node_modules/

@@ -1,44 +1,49 @@
 version: "3.9"
 
 services:
-
-  # ── PostgreSQL with pgvector extension ───────────────────────────
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: talent_postgres
+  # ── PostgreSQL database ─────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: talentiq_db
+    restart: always
     environment:
-      POSTGRES_DB:       talent_db
       POSTGRES_USER:     postgres
       POSTGRES_PASSWORD: password
+      POSTGRES_DB:       talent_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── FastAPI backend ───────────────────────────────────────────────
-  api:
+  # ── FastAPI application ─────────────────────────────────────────
+  app:
     build: .
-    container_name: talent_api
+    container_name: talentiq_app
+    restart: always
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL:      postgresql+asyncpg://postgres:password@postgres:5432/talent_db
-      DATABASE_SYNC_URL: postgresql://postgres:password@postgres:5432/talent_db
-      EMBEDDING_MODEL:   all-MiniLM-L6-v2
-      EMBEDDING_DIM:     384
+      DATABASE_URL:      postgresql+asyncpg://postgres:password@db:5432/talent_db
+      DATABASE_SYNC_URL: postgresql://postgres:password@db:5432/talent_db
+      APP_NAME:          "AI Talent Intelligence Platform"
+      APP_VERSION:       "1.0.0"
       DEBUG:             "false"
-      OPENAI_API_KEY:    ${OPENAI_API_KEY:-}
-    volumes:
-      - ./uploads:/app/uploads
+      SECRET_KEY:        "change-this-to-a-random-secret-key-in-production"
+      EMBEDDING_MODEL:   all-MiniLM-L6-v2
+      EMBEDDING_DIM:     "384"
+      MAX_FILE_SIZE_MB:  "10"
+      UPLOAD_DIR:        uploads
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
-    restart: unless-stopped
+    volumes:
+      - uploads_data:/app/uploads
 
 volumes:
   postgres_data:
+  uploads_data:

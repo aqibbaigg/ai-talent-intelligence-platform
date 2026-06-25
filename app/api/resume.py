@@ -217,3 +217,5 @@ async def get_by_skill(skill: str, limit: int = Query(default=20, ge=1, le=100),
             file_name=c.file_name, created_at=c.created_at,
         ) for c in candidates
     ]
+
+
