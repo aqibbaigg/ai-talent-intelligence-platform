@@ -2,6 +2,11 @@
 app/services/candidate_service.py
 -----------------------------------
 Resume processing pipeline.
+
+TEMP Railway-safe version:
+- Skips heavy skill extraction
+- Skips SentenceTransformer embedding generation
+- Saves candidate with dummy 384-dim embedding
 """
 
 import uuid
@@ -10,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, String
 
 from app.models.candidate import Candidate
-from app.services import parser, skill_extractor, embedder
+from app.services import parser
 from app.services.faiss_index import get_faiss_index
 from app.core.config import settings
 
@@ -20,14 +25,6 @@ async def process_resume(
     filename: str,
     db: AsyncSession,
 ) -> Candidate:
-    """
-    Process uploaded resume and save/update candidate.
-
-    Deduplication:
-    - Same filename -> update existing record
-    - Different filename -> create new candidate
-    """
-
     try:
         logger.info("Processing resume: {}", filename)
 
@@ -48,20 +45,13 @@ async def process_resume(
 
         logger.info("EXPERIENCE FOUND = {}", exp_years)
 
-        # Step 3: Extract skills
-        logger.info("Starting skill extraction...")
-        skills = skill_extractor.extract_all_skills(raw_text)
-        logger.info("Skills found ({}): {}", len(skills), skills[:10])
+        # Step 3: TEMP skip heavy skill extraction
+        logger.warning("TEMP: Skipping skill extraction on Railway")
+        skills = []
 
-        # Step 4: Generate embedding
-        logger.info("Starting embedding generation...")
-        embedding_text = embedder.prepare_resume_text(raw_text, skills)
-        embedding = await embedder.generate_embedding_async(embedding_text)
-
-        if not embedding:
-            raise ValueError("Embedding generation failed")
-
-        logger.info("Embedding generated successfully — dim={}", len(embedding))
+        # Step 4: TEMP skip heavy embedding generation
+        logger.warning("TEMP: Skipping embedding generation on Railway")
+        embedding = [0.0] * 384
 
         # Step 5: Save uploaded PDF
         file_path = None
@@ -95,11 +85,7 @@ async def process_resume(
             candidate.certifications = certifications
             candidate.embedding = embedding
 
-            logger.info(
-                "Candidate updated — id={} file={}",
-                candidate.id,
-                filename,
-            )
+            logger.info("Candidate updated — id={} file={}", candidate.id, filename)
 
         else:
             candidate = Candidate(
@@ -143,15 +129,7 @@ async def process_resume(
                     candidate_id=candidate.id,
                     embedding=candidate.embedding,
                 )
-                logger.info(
-                    "Candidate added to FAISS index — id={}",
-                    candidate.id,
-                )
-            else:
-                logger.warning(
-                    "Skipping FAISS indexing — no embedding for id={}",
-                    candidate.id,
-                )
+                logger.info("Candidate added to FAISS index — id={}", candidate.id)
 
         except Exception as e:
             logger.error("FAISS indexing failed for id={}: {}", candidate.id, e)
