@@ -390,7 +390,7 @@ async function doLogin() {
     localStorage.setItem('talentiq_user_email', data.email);
 
     showSuccess('Login successful! Redirecting...');
-    setTimeout(() => window.location.href = 'index.html', 800);
+    setTimeout(() => window.location.href = '/app', 800);
 
   } catch(e) {
     showError(e.message);

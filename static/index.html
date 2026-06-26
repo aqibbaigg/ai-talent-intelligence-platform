@@ -416,7 +416,7 @@ let selectedFiles = [];
 
 // ── Auth guard ───────────────────────────────────────────────────
 const token = localStorage.getItem('talentiq_token');
-if (!token) window.location.href = 'login.html';
+if (!token) window.location.href = '/';
 
 // Show user name in avatar
 const userName = localStorage.getItem('talentiq_user_name') || 'Recruiter';
@@ -430,7 +430,7 @@ function logout() {
   localStorage.removeItem('talentiq_token');
   localStorage.removeItem('talentiq_user_name');
   localStorage.removeItem('talentiq_user_email');
-  window.location.href = 'login.html';
+  window.location.href = '/';
 }
 
 // ── Navigation ──────────────────────────────────────────────────
