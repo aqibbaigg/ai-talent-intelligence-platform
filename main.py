@@ -4,9 +4,11 @@ main.py  —  AI Talent Intelligence Platform
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+import os
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
 from app.services.embedder import get_model
@@ -40,7 +42,7 @@ app = FastAPI(
 )
 
 
-# ── Manual CORS middleware (handles preflight properly) ───────────
+# ── Manual CORS middleware ────────────────────────────────────────
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
@@ -50,7 +52,6 @@ async def cors_middleware(request: Request, call_next):
         response.headers["Access-Control-Allow-Headers"] = "*"
         response.headers["Access-Control-Max-Age"]       = "3600"
         return response
-
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"]  = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
@@ -70,6 +71,19 @@ app.include_router(auth_router)
 app.include_router(resume_router)
 app.include_router(jobs_router)
 app.include_router(chat_router)
+
+
+# ── Serve frontend static files ───────────────────────────────────
+@app.get("/", include_in_schema=False)
+async def serve_login():
+    return FileResponse("static/login.html")
+
+@app.get("/app", include_in_schema=False)
+async def serve_app():
+    return FileResponse("static/index.html")
+
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/health", tags=["system"])

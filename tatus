@@ -1,0 +1,5 @@
+[33m1d324ec[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Add manual CORS middleware to handle preflight requests
+[33m70f1ac2[m Add OPTIONS handler for CORS preflight on bulk upload
+[33m90e217b[m Fix CORS for multipart file uploads
+[33m8b27bcd[m Force redeploy - fix CORS
+[33ma2e24b0[m Update API URL to Railway production

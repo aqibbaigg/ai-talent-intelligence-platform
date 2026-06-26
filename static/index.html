@@ -410,7 +410,7 @@
 <div class="toast-container" id="toast-container"></div>
 
 <script>
-const API = 'https://ai-talent-intelligence-platform-production.up.railway.app/api/v1';
+const API = '/api/v1';
 let currentJobId = null;
 let selectedFiles = [];
 
@@ -468,7 +468,7 @@ function toast(msg, type = 'info') {
 // ── Dashboard ────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    const res = await fetch('https://ai-talent-intelligence-platform-production.up.railway.app/health');
+    const res = await fetch('/health');
     const data = await res.json();
     document.getElementById('stat-candidates').textContent = data.candidates_indexed ?? '—';
     document.getElementById('stat-faiss').textContent = data.faiss_ready ? 'Ready ✓' : 'Not ready';
