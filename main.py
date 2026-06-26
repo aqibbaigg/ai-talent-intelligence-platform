@@ -74,16 +74,30 @@ app.include_router(chat_router)
 
 
 # ── Serve frontend static files ───────────────────────────────────
+STATIC_DIR = "static"
+
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
 @app.get("/", include_in_schema=False)
 async def serve_login():
-    return FileResponse("static/login.html")
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"))
+
+
+@app.get("/login.html", include_in_schema=False)
+async def serve_login_html():
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"))
+
+
+@app.get("/index.html", include_in_schema=False)
+async def serve_index_html():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
 
 @app.get("/app", include_in_schema=False)
 async def serve_app():
-    return FileResponse("static/index.html")
-
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
 @app.get("/health", tags=["system"])
@@ -91,15 +105,20 @@ async def health():
     from app.services.faiss_index import get_faiss_index
     idx = get_faiss_index()
     return {
-        "status":             "ok",
-        "version":            settings.APP_VERSION,
-        "embedding_model":    settings.EMBEDDING_MODEL,
+        "status": "ok",
+        "version": settings.APP_VERSION,
+        "embedding_model": settings.EMBEDDING_MODEL,
         "candidates_indexed": idx.total,
-        "faiss_ready":        idx.is_ready,
+        "faiss_ready": idx.is_ready,
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000,
-                reload=settings.DEBUG, log_level="info")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.DEBUG,
+        log_level="info",
+    )
