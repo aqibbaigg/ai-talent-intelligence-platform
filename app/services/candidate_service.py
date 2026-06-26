@@ -46,8 +46,22 @@ async def process_resume(
         logger.info("EXPERIENCE FOUND = {}", exp_years)
 
         # Step 3: TEMP skip heavy skill extraction
-        logger.warning("TEMP: Skipping skill extraction on Railway")
-        skills = []
+        logger.info("Starting lightweight skill extraction...")
+
+        COMMON_SKILLS = [
+    "Python", "SQL", "Machine Learning", "Deep Learning", "NLP",
+    "Pandas", "NumPy", "Scikit-learn", "TensorFlow", "PyTorch",
+    "FastAPI", "Flask", "PostgreSQL", "MySQL", "Power BI",
+    "Tableau", "Excel", "OpenCV", "LangChain", "FAISS",
+    "Docker", "Git", "AWS", "MLflow", "Data Analysis",
+    "Data Science", "Artificial Intelligence", "Computer Vision",
+    "REST API", "SQLAlchemy", "Alembic", "Postman"
+]
+
+        text_lower = raw_text.lower()
+        skills = [skill for skill in COMMON_SKILLS if skill.lower() in text_lower]
+
+        logger.info("Skills found ({}): {}", len(skills), skills)
 
         # Step 4: TEMP skip heavy embedding generation
         logger.warning("TEMP: Skipping embedding generation on Railway")
