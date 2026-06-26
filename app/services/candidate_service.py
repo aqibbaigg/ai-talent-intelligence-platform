@@ -1,20 +1,7 @@
 """
 app/services/candidate_service.py
 -----------------------------------
-Orchestrates the full resume processing pipeline:
-
-  1. Parse PDF → raw text
-  2. Extract structured fields (name, email, phone, education)
-  3. Extract skills (keyword + spaCy)
-  4. Generate embedding (sentence transformer)
-  5. Store in PostgreSQL (upsert by filename — allows same person
-     to have multiple resumes for different roles)
-  6. Add to FAISS index
-
-Deduplication strategy:
-  - Same filename uploaded again → update existing record
-  - Same email but different filename → create new candidate
-  This allows comparing e.g. "John_DataAnalyst.pdf" vs "John_MLEngineer.pdf"
+Resume processing pipeline.
 """
 
 import uuid
@@ -23,15 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, String
 
 from app.models.candidate import Candidate
-from app.schemas.candidate import CandidateCreate, ParsedResume, CandidateResponse
 from app.services import parser, skill_extractor, embedder
 from app.services.faiss_index import get_faiss_index
 from app.core.config import settings
 
-
-# ─────────────────────────────────────────────────────────────────
-#  Process resume — main pipeline
-# ─────────────────────────────────────────────────────────────────
 
 async def process_resume(
     file_bytes: bytes,
@@ -39,122 +21,148 @@ async def process_resume(
     db: AsyncSession,
 ) -> Candidate:
     """
-    Full resume processing pipeline.
+    Process uploaded resume and save/update candidate.
 
-    Deduplication: by filename only.
-    - Same filename → update existing record
-    - Different filename (even same email) → new candidate record
-    This allows one person to have multiple role-specific resumes.
+    Deduplication:
+    - Same filename -> update existing record
+    - Different filename -> create new candidate
     """
-    logger.info("Processing resume: {}", filename)
 
-    # ── Step 1: Parse PDF → raw text ─────────────────────────────
-    raw_text = parser.extract_text(file_bytes, filename)
-    logger.debug("Extracted {} chars from {}", len(raw_text), filename)
-
-    # ── Step 2: Extract structured fields ─────────────────────────
-    name           = parser.extract_name(raw_text)
-    email          = parser.extract_email(raw_text)
-    phone          = parser.extract_phone(raw_text)
-    education      = parser.extract_education(raw_text)
-    exp_years      = parser.extract_experience_years(raw_text)
-    certifications = parser.extract_certifications(raw_text)
-    logger.info("EXPERIENCE FOUND = {}", exp_years)
-
-    # ── Step 3: Extract skills ────────────────────────────────────
-    skills = skill_extractor.extract_all_skills(raw_text)
-    logger.info("Skills found ({}): {}", len(skills), skills[:10])
-
-    # ── Step 4: Generate embedding ────────────────────────────────
-    embedding_text = embedder.prepare_resume_text(raw_text, skills)
-    embedding      = await embedder.generate_embedding_async(embedding_text)
-    logger.debug("Embedding generated — dim={}", len(embedding))
-
-    # ── Step 5: Save to file ──────────────────────────────────────
-    file_path = None
     try:
-        save_path = settings.upload_path / f"{uuid.uuid4()}_{filename}"
-        save_path.write_bytes(file_bytes)
-        file_path = str(save_path)
-    except Exception as e:
-        logger.warning("Could not save PDF file: {}", e)
+        logger.info("Processing resume: {}", filename)
 
-    # ── Step 6: Upsert by filename ────────────────────────────────
-    # Same filename → update; different filename → new record
-    result    = await db.execute(
-        select(Candidate).where(Candidate.file_name == filename)
-    )
-    candidate = result.scalar_one_or_none()
-    is_update = candidate is not None
+        # Step 1: Parse PDF
+        raw_text = parser.extract_text(file_bytes, filename)
+        logger.debug("Extracted {} chars from {}", len(raw_text), filename)
 
-    if is_update:
-        candidate.name             = name
-        candidate.email            = email
-        candidate.phone            = phone
-        candidate.raw_text         = raw_text
-        candidate.file_path        = file_path or candidate.file_path
-        candidate.skills           = skills
-        candidate.experience_years = exp_years
-        candidate.experience_raw   = f"{exp_years} years" if exp_years else None
-        candidate.education        = education
-        candidate.certifications   = certifications
-        candidate.embedding        = embedding
-        logger.info(
-            "Candidate updated (same filename) — id={} file={}",
-            candidate.id, filename,
+        if not raw_text or len(raw_text.strip()) < 20:
+            raise ValueError("Resume text extraction failed or text is too short")
+
+        # Step 2: Extract structured fields
+        name = parser.extract_name(raw_text)
+        email = parser.extract_email(raw_text)
+        phone = parser.extract_phone(raw_text)
+        education = parser.extract_education(raw_text)
+        exp_years = parser.extract_experience_years(raw_text)
+        certifications = parser.extract_certifications(raw_text)
+
+        logger.info("EXPERIENCE FOUND = {}", exp_years)
+
+        # Step 3: Extract skills
+        logger.info("Starting skill extraction...")
+        skills = skill_extractor.extract_all_skills(raw_text)
+        logger.info("Skills found ({}): {}", len(skills), skills[:10])
+
+        # Step 4: Generate embedding
+        logger.info("Starting embedding generation...")
+        embedding_text = embedder.prepare_resume_text(raw_text, skills)
+        embedding = await embedder.generate_embedding_async(embedding_text)
+
+        if not embedding:
+            raise ValueError("Embedding generation failed")
+
+        logger.info("Embedding generated successfully — dim={}", len(embedding))
+
+        # Step 5: Save uploaded PDF
+        file_path = None
+        try:
+            settings.upload_path.mkdir(parents=True, exist_ok=True)
+            safe_filename = filename.replace("/", "_").replace("\\", "_")
+            save_path = settings.upload_path / f"{uuid.uuid4()}_{safe_filename}"
+            save_path.write_bytes(file_bytes)
+            file_path = str(save_path)
+            logger.info("Resume file saved at {}", file_path)
+        except Exception as e:
+            logger.warning("Could not save PDF file: {}", e)
+
+        # Step 6: Upsert candidate by filename
+        result = await db.execute(
+            select(Candidate).where(Candidate.file_name == filename)
         )
-    else:
-        candidate = Candidate(
-            id               = str(uuid.uuid4()),
-            name             = name,
-            email            = email,
-            phone            = phone,
-            raw_text         = raw_text,
-            file_name        = filename,
-            file_path        = file_path,
-            skills           = skills,
-            experience_years = exp_years,
-            experience_raw   = f"{exp_years} years" if exp_years else None,
-            education        = education,
-            certifications   = certifications,
-            embedding        = embedding,
-        )
-        db.add(candidate)
+        candidate = result.scalar_one_or_none()
+        is_update = candidate is not None
 
-    await db.flush()
+        if is_update:
+            candidate.name = name
+            candidate.email = email
+            candidate.phone = phone
+            candidate.raw_text = raw_text
+            candidate.file_path = file_path or candidate.file_path
+            candidate.skills = skills
+            candidate.experience_years = exp_years
+            candidate.experience_raw = f"{exp_years} years" if exp_years else None
+            candidate.education = education
+            candidate.certifications = certifications
+            candidate.embedding = embedding
 
-    logger.info(
-        "Candidate {} — id={} name={} file={} skills={} embedding={}dims",
-        "updated" if is_update else "saved",
-        candidate.id, name, filename, len(skills), len(embedding),
-    )
-
-    # ── Step 7: Add/update in FAISS index ────────────────────────
-    try:
-        index = get_faiss_index()
-        if candidate.embedding:
-            index.add(
-                candidate_id=candidate.id,
-                embedding=candidate.embedding,
-            )
             logger.info(
-                "Candidate added to FAISS index — id={}",
+                "Candidate updated — id={} file={}",
                 candidate.id,
+                filename,
             )
+
         else:
-            logger.warning(
-                "Skipping FAISS indexing — no embedding for id={}",
-                candidate.id,
+            candidate = Candidate(
+                id=str(uuid.uuid4()),
+                name=name,
+                email=email,
+                phone=phone,
+                raw_text=raw_text,
+                file_name=filename,
+                file_path=file_path,
+                skills=skills,
+                experience_years=exp_years,
+                experience_raw=f"{exp_years} years" if exp_years else None,
+                education=education,
+                certifications=certifications,
+                embedding=embedding,
             )
+
+            db.add(candidate)
+
+        await db.flush()
+        await db.commit()
+        await db.refresh(candidate)
+
+        logger.info(
+            "Candidate {} successfully — id={} name={} file={} skills={} embedding={}dims",
+            "updated" if is_update else "saved",
+            candidate.id,
+            candidate.name,
+            filename,
+            len(skills),
+            len(embedding),
+        )
+
+        # Step 7: Add/update FAISS index
+        try:
+            index = get_faiss_index()
+
+            if candidate.embedding:
+                index.add(
+                    candidate_id=candidate.id,
+                    embedding=candidate.embedding,
+                )
+                logger.info(
+                    "Candidate added to FAISS index — id={}",
+                    candidate.id,
+                )
+            else:
+                logger.warning(
+                    "Skipping FAISS indexing — no embedding for id={}",
+                    candidate.id,
+                )
+
+        except Exception as e:
+            logger.error("FAISS indexing failed for id={}: {}", candidate.id, e)
+
+        return candidate
+
     except Exception as e:
-        logger.error("FAISS indexing failed for id={}: {}", candidate.id, e)
+        logger.exception("Resume processing failed for file {}: {}", filename, e)
+        await db.rollback()
+        raise
 
-    return candidate
-
-
-# ─────────────────────────────────────────────────────────────────
-#  Read operations
-# ─────────────────────────────────────────────────────────────────
 
 async def get_candidate(candidate_id: str, db: AsyncSession) -> Candidate | None:
     result = await db.execute(
@@ -169,7 +177,7 @@ async def list_candidates(
     limit: int = 20,
 ) -> tuple[int, list[Candidate]]:
     count_result = await db.execute(select(func.count(Candidate.id)))
-    total        = count_result.scalar_one()
+    total = count_result.scalar_one()
 
     result = await db.execute(
         select(Candidate)
@@ -177,6 +185,7 @@ async def list_candidates(
         .offset(skip)
         .limit(limit)
     )
+
     return total, list(result.scalars().all())
 
 
@@ -190,4 +199,5 @@ async def get_candidates_by_skill(
         .where(cast(Candidate.skills, String).ilike(f"%{skill}%"))
         .limit(limit)
     )
+
     return list(result.scalars().all())
