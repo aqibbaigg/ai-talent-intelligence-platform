@@ -3,10 +3,9 @@ app/services/candidate_service.py
 -----------------------------------
 Resume processing pipeline.
 
-TEMP Railway-safe version:
-- Skips heavy skill extraction
-- Skips SentenceTransformer embedding generation
-- Saves candidate with dummy 384-dim embedding
+Railway-safe version:
+- Uses keyword-based skill extraction from skill_extractor.py
+- Keeps embedding as dummy vector for now
 """
 
 import uuid
@@ -15,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, String
 
 from app.models.candidate import Candidate
-from app.services import parser
+from app.services import parser, skill_extractor,embedder 
 from app.services.faiss_index import get_faiss_index
 from app.core.config import settings
 
@@ -28,14 +27,12 @@ async def process_resume(
     try:
         logger.info("Processing resume: {}", filename)
 
-        # Step 1: Parse PDF
         raw_text = parser.extract_text(file_bytes, filename)
         logger.debug("Extracted {} chars from {}", len(raw_text), filename)
 
         if not raw_text or len(raw_text.strip()) < 20:
             raise ValueError("Resume text extraction failed or text is too short")
 
-        # Step 2: Extract structured fields
         name = parser.extract_name(raw_text)
         email = parser.extract_email(raw_text)
         phone = parser.extract_phone(raw_text)
@@ -45,29 +42,26 @@ async def process_resume(
 
         logger.info("EXPERIENCE FOUND = {}", exp_years)
 
-        # Step 3: TEMP skip heavy skill extraction
-        logger.info("Starting lightweight skill extraction...")
+        # Step 3: Railway-safe skill extraction
+        logger.info("Starting skill extraction...")
+        skills = skill_extractor.extract_all_skills(raw_text)
+        logger.info("Skills found ({}): {}", len(skills), skills[:10])
 
-        COMMON_SKILLS = [
-    "Python", "SQL", "Machine Learning", "Deep Learning", "NLP",
-    "Pandas", "NumPy", "Scikit-learn", "TensorFlow", "PyTorch",
-    "FastAPI", "Flask", "PostgreSQL", "MySQL", "Power BI",
-    "Tableau", "Excel", "OpenCV", "LangChain", "FAISS",
-    "Docker", "Git", "AWS", "MLflow", "Data Analysis",
-    "Data Science", "Artificial Intelligence", "Computer Vision",
-    "REST API", "SQLAlchemy", "Alembic", "Postman"
-]
+        # Step 4: Generate semantic embedding
+        logger.info("Starting embedding generation...")
 
-        text_lower = raw_text.lower()
-        skills = [skill for skill in COMMON_SKILLS if skill.lower() in text_lower]
+        embedding_text = embedder.prepare_resume_text(
+        raw_text=raw_text,
+        skills=skills,
+)
 
-        logger.info("Skills found ({}): {}", len(skills), skills)
+        embedding = await embedder.generate_embedding_async(embedding_text)
 
-        # Step 4: TEMP skip heavy embedding generation
-        logger.warning("TEMP: Skipping embedding generation on Railway")
-        embedding = [0.0] * 384
+        logger.info(
+        "Embedding generated successfully — dim={}",
+        len(embedding),
+)
 
-        # Step 5: Save uploaded PDF
         file_path = None
         try:
             settings.upload_path.mkdir(parents=True, exist_ok=True)
@@ -79,7 +73,6 @@ async def process_resume(
         except Exception as e:
             logger.warning("Could not save PDF file: {}", e)
 
-        # Step 6: Upsert candidate by filename
         result = await db.execute(
             select(Candidate).where(Candidate.file_name == filename)
         )
@@ -98,9 +91,7 @@ async def process_resume(
             candidate.education = education
             candidate.certifications = certifications
             candidate.embedding = embedding
-
             logger.info("Candidate updated — id={} file={}", candidate.id, filename)
-
         else:
             candidate = Candidate(
                 id=str(uuid.uuid4()),
@@ -117,7 +108,6 @@ async def process_resume(
                 certifications=certifications,
                 embedding=embedding,
             )
-
             db.add(candidate)
 
         await db.flush()
@@ -134,17 +124,14 @@ async def process_resume(
             len(embedding),
         )
 
-        # Step 7: Add/update FAISS index
         try:
             index = get_faiss_index()
-
             if candidate.embedding:
                 index.add(
                     candidate_id=candidate.id,
                     embedding=candidate.embedding,
                 )
                 logger.info("Candidate added to FAISS index — id={}", candidate.id)
-
         except Exception as e:
             logger.error("FAISS indexing failed for id={}: {}", candidate.id, e)
 
